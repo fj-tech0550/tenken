@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <!--
+    GitHub Pages版：viewportを静的メタで確実に設定
+    GASのラッパーがないため width=device-width が正しく機能する
+  -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="空調点検">
+  <title>空調機点検アプリ</title>
+  <style>
+    :root {
+      --primary:      #1a73e8;
+      --primary-dark: #1557b0;
+      --success:      #34a853;
+      --danger:       #ea4335;
+      --bg:           #f0f4f8;
+      --card:         #ffffff;
+      --text:         #202124;
+      --sub:          #5f6368;
+      --border:       #dadce0;
+      --radius:       14px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 16px;
+      min-height: 100vh;
+      padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── ヘッダー ─── */
+    .app-header {
+      background: var(--primary);
+      color: #fff;
+      padding: 14px 16px;
+      padding-top: calc(14px + env(safe-area-inset-top, 0px));
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .header-left h1   { font-size: 20px; font-weight: 700; }
+    .header-left .hdate { font-size: 14px; opacity: 0.85; margin-top: 3px; }
+    .save-btn {
+      background: #fff;
+      color: var(--primary);
+      border: none;
+      border-radius: 26px;
+      padding: 12px 26px;
+      font-size: 17px;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      flex-shrink: 0;
+      touch-action: manipulation;
+    }
+    .save-btn:active { transform: scale(0.95); opacity: 0.85; }
+
+    /* ─── セクションカード ─── */
+    .main { padding: 12px; }
+    .section {
+      background: var(--card);
+      border-radius: var(--radius);
+      margin-bottom: 14px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.09);
+    }
+    .section-head {
+      padding: 13px 16px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .sh-blue   { background:#e8f0fe; color:#1a56db; }
+    .sh-red    { background:#fce8e6; color:#c5221f; }
+    .sh-green  { background:#e6f4ea; color:#137333; }
+    .sh-purple { background:#f3e8fd; color:#6a1b9a; }
+    .sh-teal   { background:#e0f7fa; color:#006064; }
+
+    /* ─── 通常フィールド行 ─── */
+    .frow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .frow:first-of-type { border-top: none; }
+    .flabel {
+      font-size: 16px;
+      color: var(--sub);
+      min-width: 100px;
+      flex-shrink: 0;
+      line-height: 1.3;
+    }
+    .funit {
+      font-size: 15px;
+      color: var(--sub);
+      min-width: 28px;
+      flex-shrink: 0;
+    }
+    .finput {
+      flex: 1;
+      height: 52px;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 0 14px;
+      font-size: 16px;
+      color: var(--text);
+      background: #fff;
+      -webkit-appearance: none;
+      appearance: none;
+      touch-action: manipulation;
+      outline: none;
+    }
+    .finput:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(26,115,232,0.18); }
+    .finput.calc  { background:#edf3ff; color:var(--primary-dark); font-weight:700; border-color:#b3c8f5; }
+    select.finput {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='%235f6368'%3E%3Cpath d='M7 10l5 5 5-5H7z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 36px;
+    }
+    textarea.finput { height: 88px; padding: 12px 14px; resize: none; line-height: 1.6; }
+
+    /* ─── ペア行（2列） ─── */
+    .pair-row { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); }
+    .pair-cell { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .pair-cell + .pair-cell { border-left: 1px solid var(--border); }
+    .pair-label { font-size: 14px; color: var(--sub); line-height: 1.2; }
+    .pair-input-wrap { display: flex; align-items: center; gap: 4px; }
+    .pinput {
+      flex: 1;
+      min-width: 0;
+      height: 50px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 0 6px;
+      font-size: 16px;
+      text-align: center;
+      color: var(--text);
+      background: #fff;
+      -webkit-appearance: none;
+      appearance: none;
+      touch-action: manipulation;
+      outline: none;
+    }
+    .pinput:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(26,115,232,0.18); }
+    .pinput.calc  { background:#edf3ff; color:var(--primary-dark); font-weight:700; border-color:#b3c8f5; }
+    .pair-unit { font-size: 14px; color: var(--sub); flex-shrink: 0; }
+
+    /* ─── 診断ボックス ─── */
+    .diag-wrap { padding: 10px 16px 14px; }
+    .diag-label { font-size: 14px; color: var(--sub); margin-bottom: 8px; }
+    .diag-box {
+      border-radius: 10px; padding: 14px 16px;
+      font-size: 16px; line-height: 1.7;
+      white-space: pre-wrap; word-break: break-all;
+    }
+    .diag-box.ok      { background:#e6f4ea; color:#137333; border:1px solid #b5d9bf; }
+    .diag-box.alert   { background:#fce8e6; color:#c5221f; border:1px solid #f5c6c4; }
+    .diag-box.pending { background:#f1f3f4; color:#5f6368; border:1px solid #dadce0; }
+    .diag-box.loading { background:#f1f3f4; color:#9aa0a6; border:1px solid #dadce0; font-style:italic; }
+
+    /* ─── ローディング ─── */
+    .overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.52); z-index:200; flex-direction:column; align-items:center; justify-content:center; color:#fff; }
+    .overlay.active { display:flex; }
+    .spinner { width:54px; height:54px; border:5px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:spin .75s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .overlay-msg { margin-top:18px; font-size:17px; font-weight:600; }
+
+    /* ─── トースト ─── */
+    .toast { display:none; position:fixed; bottom:calc(24px + env(safe-area-inset-bottom,0px)); left:50%; transform:translateX(-50%); padding:14px 28px; border-radius:30px; font-size:15px; font-weight:600; white-space:nowrap; z-index:300; box-shadow:0 4px 16px rgba(0,0,0,0.3); pointer-events:none; }
+    .toast.success { background:var(--success); color:#fff; }
+    .toast.error   { background:var(--danger);  color:#fff; }
+    .toast.show    { display:block; animation:toastAnim 3.2s ease forwards; }
+    @keyframes toastAnim {
+      0%  { opacity:0; transform:translateX(-50%) translateY(12px); }
+      12% { opacity:1; transform:translateX(-50%) translateY(0); }
+      78% { opacity:1; }
+      100%{ opacity:0; transform:translateX(-50%) translateY(-6px); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="overlay" id="overlay"><div class="spinner"></div><div class="overlay-msg" id="overlay-msg">保存中...</div></div>
+<div class="toast" id="toast"></div>
+
+<header class="app-header">
+  <div class="header-left">
+    <h1>🌡 空調機点検</h1>
+    <div class="hdate" id="hdate"></div>
+  </div>
+  <button class="save-btn" onclick="handleSave()">💾 保存</button>
+</header>
+
+<main class="main">
+
+  <!-- ① 基本情報 -->
+  <div class="section">
+    <div class="section-head sh-blue">📋 基本情報</div>
+    <div class="frow"><div class="flabel">現場名</div><input class="finput" type="text" id="現場名" placeholder="例：〇〇ビル"></div>
+    <div class="frow"><div class="flabel">系統</div><input class="finput" type="text" id="系統" placeholder="例：1号機"></div>
+    <div class="frow"><div class="flabel">型式</div><input class="finput" type="text" id="型式" placeholder="例：RCID-AP450GHP7"></div>
+    <div class="frow"><div class="flabel">製造番号</div><input class="finput" type="text" id="製造番号"></div>
+    <div class="frow">
+      <div class="flabel">冷媒種</div>
+      <select class="finput" id="冷媒種" onchange="onRefrigerantChange()">
+        <option value="">選択してください</option>
+        <option value="R22">R22</option>
+        <option value="R32">R32</option>
+        <option value="R407C">R407C</option>
+        <option value="R410A">R410A</option>
+        <option value="R134a">R134a</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- ② 圧力・飽和温度 -->
+  <div class="section">
+    <div class="section-head sh-red">🔴 圧力・飽和温度</div>
+    <div class="pair-row">
+      <div class="pair-cell"><div class="pair-label">高圧圧力</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="高圧圧力" placeholder="0.00" step="0.01" oninput="onPressureChange()"><span class="pair-unit">MPa</span></div></div>
+      <div class="pair-cell"><div class="pair-label">高圧飽和温度</div><div class="pair-input-wrap"><input class="pinput calc" type="text" id="高圧飽和温度" readonly placeholder="自動"><span class="pair-unit">℃</span></div></div>
+    </div>
+    <div class="pair-row">
+      <div class="pair-cell"><div class="pair-label">低圧圧力</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="低圧圧力" placeholder="0.00" step="0.01" oninput="onPressureChange()"><span class="pair-unit">MPa</span></div></div>
+      <div class="pair-cell"><div class="pair-label">低圧飽和温度</div><div class="pair-input-wrap"><input class="pinput calc" type="text" id="低圧飽和温度" readonly placeholder="自動"><span class="pair-unit">℃</span></div></div>
+    </div>
+  </div>
+
+  <!-- ③ 管温度 -->
+  <div class="section">
+    <div class="section-head sh-green">🌡 管温度</div>
+    <div class="pair-row">
+      <div class="pair-cell"><div class="pair-label">吐出管温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="吐出管温度" placeholder="0.0" step="0.1" oninput="scheduleDiagnosis()"><span class="pair-unit">℃</span></div></div>
+      <div class="pair-cell"><div class="pair-label">吸入管温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="吸入管温度" placeholder="0.0" step="0.1"><span class="pair-unit">℃</span></div></div>
+    </div>
+    <div class="pair-row">
+      <div class="pair-cell"><div class="pair-label">膨張弁入口温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="膨張弁入口温度" placeholder="0.0" step="0.1"><span class="pair-unit">℃</span></div></div>
+      <div class="pair-cell"><div class="pair-label">膨張弁出口温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="膨張弁出口温度" placeholder="0.0" step="0.1"><span class="pair-unit">℃</span></div></div>
+    </div>
+    <div class="pair-row">
+      <div class="pair-cell"><div class="pair-label">室外吸込温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="室外吸込温度" placeholder="0.0" step="0.1" oninput="scheduleDiagnosis()"><span class="pair-unit">℃</span></div></div>
+      <div class="pair-cell"><div class="pair-label">室外吹出温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="室外吹出温度" placeholder="0.0" step="0.1"><span class="pair-unit">℃</span></div></div>
+    </div>
+  </div>
+
+  <!-- ④ 電気系 -->
+  <div class="section">
+    <div class="section-head sh-purple">⚡ 電気系</div>
+    <div class="frow"><div class="flabel">総合電圧</div><input class="finput" type="number" inputmode="decimal" id="総合電圧" placeholder="0" step="1"><div class="funit">V</div></div>
+    <div class="frow"><div class="flabel">総合電流</div><input class="finput" type="number" inputmode="decimal" id="総合電流" placeholder="0.0" step="0.1"><div class="funit">A</div></div>
+    <div class="frow"><div class="flabel">圧縮機 INV</div><input class="finput" type="number" inputmode="decimal" id="圧縮機_INV" placeholder="0.0" step="0.1"><div class="funit">A</div></div>
+    <div class="pair-row">
+      <div class="pair-cell"><div class="pair-label">圧縮機 STD1</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="圧縮機_STD1" placeholder="0.0" step="0.1"><span class="pair-unit">A</span></div></div>
+      <div class="pair-cell"><div class="pair-label">圧縮機 STD2</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="圧縮機_STD2" placeholder="0.0" step="0.1"><span class="pair-unit">A</span></div></div>
+    </div>
+    <div class="pair-row">
+      <div class="pair-cell"><div class="pair-label">FAN1</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="FAN1" placeholder="0.0" step="0.1"><span class="pair-unit">A</span></div></div>
+      <div class="pair-cell"><div class="pair-label">FAN2</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="FAN2" placeholder="0.0" step="0.1"><span class="pair-unit">A</span></div></div>
+    </div>
+  </div>
+
+  <!-- ⑤ 診断・備考 -->
+  <div class="section">
+    <div class="section-head sh-teal">🔍 自動診断・備考</div>
+    <div class="diag-wrap">
+      <div class="diag-label">診断結果</div>
+      <div class="diag-box pending" id="diag-box">値を入力すると自動診断します</div>
+    </div>
+    <div class="frow">
+      <div class="flabel">報告書掲載</div>
+      <select class="finput" id="報告書へ掲載する情報">
+        <option value="自動診断">自動診断</option>
+        <option value="備考内容">備考内容</option>
+        <option value="両方">両方</option>
+      </select>
+    </div>
+    <div class="frow" style="align-items:flex-start;">
+      <div class="flabel" style="padding-top:12px;">備考</div>
+      <textarea class="finput" id="備考" placeholder="特記事項があれば入力"></textarea>
+    </div>
+  </div>
+
+</main>
+
+<script>
+'use strict';
+
+// =====================================================
+// ★ GAS エンドポイントURL（デプロイ後に書き換える）
+// =====================================================
+const GAS_ENDPOINT = 'ここにGASのデプロイURLを貼り付ける';
+// 例: 'https://script.google.com/macros/s/AKfycbxxxxxxxxxxxxxxxx/exec'
+
+// =====================================================
+// GAS API 呼び出しユーティリティ
+// Content-Type: text/plain でプリフライトを回避しつつCORSを通す
+// =====================================================
+async function callGAS(action, params = {}) {
+  const res = await fetch(GAS_ENDPOINT, {
+    method:   'POST',
+    redirect: 'follow',
+    headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
+    body:     JSON.stringify({ action, ...params })
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+// =====================================================
+// iOSオートズーム対策
+// 入力タップ直前にviewportをロックしてズームを防ぐ
+// =====================================================
+(function preventIOSZoom() {
+  const LOCKED   = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
+  const UNLOCKED = 'width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover';
+
+  document.addEventListener('touchstart', (e) => {
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+      document.querySelector('meta[name=viewport]')?.setAttribute('content', LOCKED);
+    }
+  }, { passive: true });
+
+  document.addEventListener('focusout', () => {
+    setTimeout(() => {
+      document.querySelector('meta[name=viewport]')?.setAttribute('content', UNLOCKED);
+    }, 300);
+  });
+})();
+
+// =====================================================
+// 飽和温度テーブル（howaondo2.js より移植）
+// =====================================================
+const R22List   = [0.004,0.014,0.025,0.037,0.049,0.063,0.077,0.092,0.108,0.126,0.144,0.163,0.184,0.206,0.229,0.253,0.279,0.306,0.335,0.365,0.397,0.43,0.465,0.501,0.54,0.58,0.622,0.665,0.711,0.759,0.809,0.861,0.915,0.971,1.03,1.091,1.154,1.22,1.289,1.36,1.433,1.509,1.589,1.67,1.755,1.843,1.933,2.027,2.124,2.224,2.328];
+const R134aList = [-37.2,-33.0,-28.5,-23.5,-18.2,-12.4,-6.1,0.008,0.011,0.021,0.032,0.044,0.056,0.070,0.084,0.100,0.116,0.134,0.152,0.171,0.192,0.214,0.237,0.261,0.287,0.314,0.342,0.372,0.404,0.436,0.471,0.507,0.545,0.585,0.626,0.669,0.715,0.762,0.811,0.862,0.916,0.971,1.029,1.089,1.152,1.216,1.284,1.354,1.427,1.502,1.580];
+const R32List   = [0.076,0.093,0.111,0.130,0.150,0.172,0.195,0.220,0.247,0.275,0.304,0.336,0.369,0.405,0.442,0.481,0.523,0.567,0.613,0.661,0.712,0.765,0.821,0.880,0.941,1.006,1.073,1.143,1.217,1.293,1.373,1.457,1.543,1.634,1.728,1.826,1.928,2.034,2.144,2.258,2.377,2.500,2.628,2.760,2.898,3.040,3.187,3.340,3.498,3.662,3.832];
+const R407CList = [-11.9,-5.1,0.003,0.013,0.025,0.037,0.050,0.064,0.079,0.096,0.113,0.131,0.151,0.172,0.194,0.218,0.243,0.269,0.298,0.327,0.359,0.392,0.426,0.463,0.502,0.542,0.721,0.770,0.822,0.877,0.933,0.993,1.054,1.118,1.185,1.254,1.326,1.401,1.479,1.559,1.643,1.730,1.820,1.913,2.009,2.109,2.212,2.319,2.429,2.543,2.661];
+const R410AList = [0.073,0.090,0.107,0.216,0.146,0.168,0.191,0.215,0.241,0.269,0.298,0.329,0.361,0.396,0.432,0.471,0.512,0.554,0.599,0.646,0.693,0.748,0.803,0.860,0.920,0.982,1.051,1.120,1.191,1.266,1.344,1.425,1.509,1.597,1.689,1.784,1.883,1.986,2.092,2.203,2.318,2.437,2.561,2.689,2.822,2.960,3.102,3.250,3.403,3.562,3.726];
+const OndoList  = [-40,-38,-36,-34,-32,-30,-28,-26,-24,-22,-20,-18,-16,-14,-12,-10,-8,-6,-4,-2,0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58,60];
+const REFRIGERANT_MAP = { R22:R22List, R32:R32List, R407C:R407CList, R410A:R410AList, R134a:R134aList };
+
+function calcSatTemp(pressure, list) {
+  if (pressure === '' || pressure == null || isNaN(pressure)) return '';
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] > pressure) {
+      if (i === 0) return String(OndoList[0]);
+      return String(OndoList[(list[i]-pressure > pressure-list[i-1]) ? i-1 : i]);
+    }
+  }
+  return '範囲外';
+}
+
+function onRefrigerantChange() { calcSaturationTemp(); scheduleDiagnosis(); }
+function onPressureChange()    { calcSaturationTemp(); scheduleDiagnosis(); }
+
+function calcSaturationTemp() {
+  const list = REFRIGERANT_MAP[document.getElementById('冷媒種').value];
+  document.getElementById('高圧飽和温度').value = list ? calcSatTemp(parseFloat(document.getElementById('高圧圧力').value), list) : '';
+  document.getElementById('低圧飽和温度').value = list ? calcSatTemp(parseFloat(document.getElementById('低圧圧力').value), list) : '';
+}
+
+// =====================================================
+// 自動診断
+// =====================================================
+let diagRules = [], diagTimer = null, rulesLoaded = false;
+
+const ALL_FIELDS = ['現場名','系統','型式','製造番号','冷媒種','総合電圧','総合電流',
+  '圧縮機_INV','圧縮機_STD1','圧縮機_STD2','FAN1','FAN2',
+  '高圧圧力','低圧圧力','高圧飽和温度','低圧飽和温度',
+  '吐出管温度','吸入管温度','膨張弁入口温度','膨張弁出口温度',
+  '室外吸込温度','室外吹出温度','備考'];
+
+function collectValues() {
+  const v = {};
+  ALL_FIELDS.forEach(c => { const el = document.getElementById(c); v[c] = el ? el.value : ''; });
+  return v;
+}
+
+function formatMessage(t, vals) {
+  let r = t;
+  for (const k in vals) r = r.replace(new RegExp(`\\{${k}\\}`, 'g'), vals[k]);
+  return r.replace(/\\n/g, '\n');
+}
+
+function scheduleDiagnosis() { clearTimeout(diagTimer); diagTimer = setTimeout(runDiagnosis, 400); }
+
+function runDiagnosis() {
+  const box = document.getElementById('diag-box');
+  if (!rulesLoaded) { box.className='diag-box loading'; box.textContent='診断ルール読込中...'; return; }
+  if (!diagRules.length) { box.className='diag-box pending'; box.textContent='診断ルール未取得'; return; }
+
+  const fv = collectValues(), msgs = [];
+  diagRules.forEach(({ field1, operator, field2, condition, threshold, message }) => {
+    const v1 = parseFloat(fv[field1]), v2 = field2 ? parseFloat(fv[field2]) : 0;
+    let met = false;
+    if (operator==='-'&&field2) { const d=v1-v2; met=condition==='<'?d<threshold:condition==='>'?d>threshold:d===threshold; }
+    else { met=condition==='<'?v1<threshold:condition==='>'?v1>threshold:v1===threshold; }
+    if (met&&!isNaN(v1)) msgs.push(formatMessage(message,{...fv,x:v1,y:v2}));
+  });
+
+  if (msgs.length) { box.className='diag-box alert'; box.textContent=msgs.join('\n\n'); }
+  else             { box.className='diag-box ok';    box.textContent='✓ 異常なし'; }
+}
+
+// =====================================================
+// 保存
+// =====================================================
+async function handleSave() {
+  if (!document.getElementById('系統').value.trim()) {
+    showToast('「系統」を入力してください', 'error');
+    return;
+  }
+
+  showOverlay('kintone に保存中...');
+  try {
+    const txtFields = ['現場名','系統','型式','製造番号','備考'];
+    const numFields = ['総合電圧','総合電流','圧縮機_INV','圧縮機_STD1','圧縮機_STD2','FAN1','FAN2',
+                       '高圧圧力','低圧圧力','高圧飽和温度','低圧飽和温度',
+                       '吐出管温度','吸入管温度','膨張弁入口温度','膨張弁出口温度',
+                       '室外吸込温度','室外吹出温度'];
+    const record = {};
+    txtFields.forEach(c => { const el=document.getElementById(c); if(el) record[c]={value:el.value}; });
+    numFields.forEach(c => { const el=document.getElementById(c); if(el) record[c]={value:el.value||null}; });
+    ['冷媒種','報告書へ掲載する情報'].forEach(c => { const el=document.getElementById(c); if(el) record[c]={value:el.value}; });
+
+    const diagBox  = document.getElementById('diag-box');
+    const diagText = diagBox.classList.contains('ok') ? '' : diagBox.textContent;
+    record['自動診断2'] = { value: diagText };
+
+    const docchi = record['報告書へ掲載する情報'].value, biko = record['備考'].value;
+    record['報告書用フィールド'] = { value:
+      docchi==='備考内容' ? biko :
+      docchi==='自動診断' ? diagText :
+      (biko ? biko+'\n\n'+diagText : diagText)
+    };
+
+    const res = await callGAS('saveRecord', { record });
+    hideOverlay();
+    showToast(`✅ 保存完了（ID: ${res.id}）`, 'success');
+
+  } catch (err) {
+    hideOverlay();
+    showToast('❌ 保存失敗: ' + err.message, 'error');
+    console.error(err);
+  }
+}
+
+// =====================================================
+// UI
+// =====================================================
+function showOverlay(msg) { document.getElementById('overlay-msg').textContent=msg; document.getElementById('overlay').classList.add('active'); }
+function hideOverlay()    { document.getElementById('overlay').classList.remove('active'); }
+
+let toastTimer = null;
+function showToast(msg, type) {
+  const el = document.getElementById('toast');
+  clearTimeout(toastTimer);
+  el.textContent=msg; el.className=`toast ${type} show`;
+  toastTimer=setTimeout(()=>{ el.className='toast'; }, 3200);
+}
+
+// =====================================================
+// 初期化
+// =====================================================
+document.addEventListener('DOMContentLoaded', async () => {
+  const D=new Date(), wd=['日','月','火','水','木','金','土'][D.getDay()];
+  document.getElementById('hdate').textContent =
+    `${D.getFullYear()}年${D.getMonth()+1}月${D.getDate()}日（${wd}）`;
+
+  // 診断ルール取得
+  try {
+    const data = await callGAS('getDiagRules');
+    diagRules   = data.rules || [];
+    rulesLoaded = true;
+  } catch {
+    diagRules   = [];
+    rulesLoaded = true;
+  }
+  runDiagnosis();
+});
+</script>
+</body>
+</html>
