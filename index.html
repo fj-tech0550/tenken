@@ -121,19 +121,11 @@
 
     /* ─── セクションカード ─── */
     .main {
-      padding-top: 12px;
-      padding-bottom: 12px;
-      /*
-        画面幅に応じてサイドパディングを調整。
-        350px 前後のコンテンツ幅を維持するため、
-        広い iPhone ほど左右の余白を増やす。
-          SE   (375px): padding ≈ 12px → フォーム幅 351px
-          13   (390px): padding ≈ 20px → フォーム幅 350px
-          Plus (430px): padding = 40px → フォーム幅 350px
-          iPad (768px): padding = 209px → フォーム幅 350px（中央揃え）
-      */
-      padding-left:  max(12px, calc((100vw - 350px) / 2));
-      padding-right: max(12px, calc((100vw - 350px) / 2));
+      padding: 12px;
+      /* iPhone（〜430px）はフル幅。タブレット以上は中央寄せ */
+      max-width: 480px;
+      margin-left: auto;
+      margin-right: auto;
     }
     .section {
       background: var(--card);
