@@ -153,6 +153,7 @@
       gap: 10px;
       padding: 10px 16px;
       border-top: 1px solid var(--border);
+      overflow: hidden;      /* ← はみ出しをカード内でクリップ */
     }
     .frow:first-of-type { border-top: none; }
     .flabel {
@@ -170,6 +171,7 @@
     }
     .finput {
       flex: 1;
+      min-width: 0;          /* ← input 要素の暗黙 min-width をリセット */
       height: 62px;
       border: 1.5px solid var(--border);
       border-radius: 10px;
