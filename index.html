@@ -21,6 +21,7 @@
       --primary-dark: #1557b0;
       --success:      #34a853;
       --danger:       #ea4335;
+      --warn:         #f9a825;
       --bg:           #f0f4f8;
       --card:         #ffffff;
       --text:         #202124;
@@ -37,7 +38,7 @@
       color: var(--text);
       font-size: 16px;
       min-height: 100vh;
-      padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+      padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
       -webkit-font-smoothing: antialiased;
     }
 
@@ -58,22 +59,56 @@
     }
     .header-left h1   { font-size: 24px; font-weight: 700; }
     .header-left .hdate { font-size: 16px; opacity: 0.85; margin-top: 3px; }
-    .save-btn {
-      background: #fff;
-      color: var(--primary);
-      border: none;
-      border-radius: 26px;
-      padding: 13px 28px;
-      font-size: 20px;
-      font-weight: 800;
+
+    /* 過去記録ボタン */
+    .rec-btn {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+      border: 1.5px solid rgba(255,255,255,0.5);
+      border-radius: 22px;
+      padding: 10px 20px;
+      font-size: 18px;
+      font-weight: 700;
       cursor: pointer;
       white-space: nowrap;
       -webkit-tap-highlight-color: transparent;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
       flex-shrink: 0;
       touch-action: manipulation;
     }
-    .save-btn:active { transform: scale(0.95); opacity: 0.85; }
+    .rec-btn:active { opacity: 0.7; }
+
+    /* ─── 編集モードバナー ─── */
+    .edit-banner {
+      display: none;
+      background: #fff3cd;
+      border-bottom: 2px solid #f9a825;
+      padding: 12px 16px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      position: sticky;
+      top: calc(64px + env(safe-area-inset-top, 0px));
+      z-index: 99;
+    }
+    .edit-banner.active { display: flex; }
+    .edit-banner-text {
+      font-size: 17px;
+      font-weight: 700;
+      color: #7a5000;
+    }
+    .cancel-edit-btn {
+      background: #f9a825;
+      color: #fff;
+      border: none;
+      border-radius: 18px;
+      padding: 8px 18px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+      flex-shrink: 0;
+    }
+    .cancel-edit-btn:active { opacity: 0.7; }
 
     /* ─── セクションカード ─── */
     .main { padding: 12px; }
@@ -184,15 +219,41 @@
     .diag-box.pending { background:#f1f3f4; color:#5f6368; border:1px solid #dadce0; }
     .diag-box.loading { background:#f1f3f4; color:#9aa0a6; border:1px solid #dadce0; font-style:italic; }
 
+    /* ─── 下部保存ボタン ─── */
+    .save-section {
+      padding: 8px 12px 16px;
+    }
+    .save-btn {
+      width: 100%;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 16px;
+      padding: 22px;
+      font-size: 22px;
+      font-weight: 800;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      box-shadow: 0 4px 14px rgba(26,115,232,0.4);
+      touch-action: manipulation;
+      letter-spacing: 1px;
+    }
+    .save-btn:active { transform: scale(0.97); opacity: 0.9; }
+    .save-btn:disabled {
+      background: #9aa0a6;
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+
     /* ─── ローディング ─── */
-    .overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.52); z-index:200; flex-direction:column; align-items:center; justify-content:center; color:#fff; }
+    .overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.52); z-index:500; flex-direction:column; align-items:center; justify-content:center; color:#fff; }
     .overlay.active { display:flex; }
     .spinner { width:54px; height:54px; border:5px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:spin .75s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
     .overlay-msg { margin-top:18px; font-size:17px; font-weight:600; }
 
     /* ─── トースト ─── */
-    .toast { display:none; position:fixed; bottom:calc(24px + env(safe-area-inset-bottom,0px)); left:50%; transform:translateX(-50%); padding:16px 32px; border-radius:30px; font-size:18px; font-weight:600; white-space:nowrap; z-index:300; box-shadow:0 4px 16px rgba(0,0,0,0.3); pointer-events:none; }
+    .toast { display:none; position:fixed; bottom:calc(24px + env(safe-area-inset-bottom,0px)); left:50%; transform:translateX(-50%); padding:16px 32px; border-radius:30px; font-size:18px; font-weight:600; white-space:nowrap; z-index:600; box-shadow:0 4px 16px rgba(0,0,0,0.3); pointer-events:none; }
     .toast.success { background:var(--success); color:#fff; }
     .toast.error   { background:var(--danger);  color:#fff; }
     .toast.show    { display:block; animation:toastAnim 3.2s ease forwards; }
@@ -202,6 +263,174 @@
       78% { opacity:1; }
       100%{ opacity:0; transform:translateX(-50%) translateY(-6px); }
     }
+
+    /* ─── 過去記録 ボトムシート ─── */
+    .modal-bg {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 200;
+    }
+    .modal-bg.active { display: block; }
+
+    .bottom-sheet {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      background: var(--card);
+      border-radius: 20px 20px 0 0;
+      z-index: 300;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    .bottom-sheet.open { transform: translateY(0); }
+
+    .sheet-handle {
+      width: 42px; height: 5px;
+      background: #dadce0;
+      border-radius: 3px;
+      margin: 12px auto 0;
+      flex-shrink: 0;
+    }
+    .sheet-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .sheet-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .sheet-close {
+      background: #f1f3f4;
+      border: none;
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--sub);
+      touch-action: manipulation;
+    }
+    .sheet-close:active { opacity: 0.6; }
+
+    .sheet-loading {
+      padding: 32px;
+      text-align: center;
+      color: var(--sub);
+      font-size: 18px;
+    }
+
+    .records-list {
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      flex: 1;
+      padding: 8px 0;
+    }
+
+    .record-item {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .record-item:active { background: #f8f9fa; }
+    .record-item:last-child { border-bottom: none; }
+    .ri-date {
+      font-size: 14px;
+      color: var(--sub);
+      margin-bottom: 3px;
+    }
+    .ri-main {
+      font-size: 19px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+    .ri-sub {
+      font-size: 16px;
+      color: var(--sub);
+    }
+    .ri-empty {
+      padding: 40px 20px;
+      text-align: center;
+      color: var(--sub);
+      font-size: 18px;
+    }
+
+    /* ─── アクションシート ─── */
+    .action-sheet {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      background: transparent;
+      z-index: 400;
+      padding: 0 12px calc(12px + env(safe-area-inset-bottom, 0px));
+      transform: translateY(100%);
+      transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    .action-sheet.open { transform: translateY(0); }
+
+    .action-card {
+      background: var(--card);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .action-info {
+      padding: 14px 18px;
+      background: #f8f9fa;
+      border-bottom: 1px solid var(--border);
+    }
+    .action-info-label {
+      font-size: 13px;
+      color: var(--sub);
+      margin-bottom: 4px;
+    }
+    .action-info-text {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .action-btn {
+      width: 100%;
+      background: none;
+      border: none;
+      border-top: 1px solid var(--border);
+      padding: 18px;
+      font-size: 19px;
+      font-weight: 600;
+      text-align: center;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .action-btn:first-of-type { border-top: none; }
+    .action-btn:active { background: #f1f3f4; }
+    .action-btn.blue  { color: var(--primary); }
+    .action-btn.green { color: var(--success); }
+    .action-btn-cancel {
+      width: 100%;
+      background: var(--card);
+      border: none;
+      border-radius: 16px;
+      padding: 18px;
+      font-size: 19px;
+      font-weight: 700;
+      color: var(--danger);
+      text-align: center;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .action-btn-cancel:active { opacity: 0.7; }
   </style>
 </head>
 <body>
@@ -209,13 +438,50 @@
 <div class="overlay" id="overlay"><div class="spinner"></div><div class="overlay-msg" id="overlay-msg">保存中...</div></div>
 <div class="toast" id="toast"></div>
 
+<!-- 過去記録 背景オーバーレイ -->
+<div class="modal-bg" id="records-bg"></div>
+
+<!-- 過去記録 ボトムシート -->
+<div class="bottom-sheet" id="records-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <span class="sheet-title">📋 過去記録</span>
+    <button class="sheet-close" id="btn-close-records">✕</button>
+  </div>
+  <div class="records-list" id="records-list">
+    <div class="sheet-loading" id="records-loading">読み込み中...</div>
+  </div>
+</div>
+
+<!-- アクションシート 背景オーバーレイ -->
+<div class="modal-bg" id="action-bg"></div>
+
+<!-- アクションシート -->
+<div class="action-sheet" id="action-sheet">
+  <div class="action-card">
+    <div class="action-info">
+      <div class="action-info-label">選択したレコード</div>
+      <div class="action-info-text" id="action-rec-label">—</div>
+    </div>
+    <button class="action-btn blue" id="btn-do-edit">✏️ このレコードを編集する</button>
+    <button class="action-btn green" id="btn-do-copy">📋 機器情報をコピーして新規保存</button>
+  </div>
+  <button class="action-btn-cancel" id="btn-cancel-action">キャンセル</button>
+</div>
+
 <header class="app-header">
   <div class="header-left">
     <h1>🌡 空調機点検</h1>
     <div class="hdate" id="hdate"></div>
   </div>
-  <button class="save-btn" id="btn-save">💾 保存</button>
+  <button class="rec-btn" id="btn-open-records">📋 過去記録</button>
 </header>
+
+<!-- 編集モードバナー -->
+<div class="edit-banner" id="edit-banner">
+  <div class="edit-banner-text" id="edit-banner-text">✏️ 編集モード</div>
+  <button class="cancel-edit-btn" id="btn-cancel-edit">× 編集解除</button>
+</div>
 
 <main class="main">
 
@@ -306,23 +572,23 @@
     </div>
   </div>
 
+  <!-- 保存ボタン（下部） -->
+  <div class="save-section">
+    <button class="save-btn" id="btn-save">💾 保存</button>
+  </div>
+
 </main>
 
 <script>
 'use strict';
 
 // =====================================================
-// ★ GAS エンドポイントURL（デプロイ後に書き換える）
+// ★ GAS エンドポイントURL
 // =====================================================
 const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxY9uV845y4Ul_OJb3uPdNlk2BF7M_x7Fq3eVFYVjts3E_kTihk6wsMI5GJE-gF6dMRig/exec';
-// 例: 'https://script.google.com/macros/s/AKfycbxxxxxxxxxxxxxxxx/exec'
 
 // =====================================================
 // GAS API 呼び出しユーティリティ（GET版）
-//
-// GASは302リダイレクトを使うため、POSTだとブラウザが
-// リダイレクト後にGETへ変換しボディが消える。
-// GETにしてURLパラメータで送ることで確実に動作する。
 // =====================================================
 async function callGAS(action, params = {}) {
   const url = new URL(GAS_ENDPOINT);
@@ -332,14 +598,12 @@ async function callGAS(action, params = {}) {
   }
   const res = await fetch(url.toString(), { redirect: 'follow' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
-  // GASのレスポンスはtext/plainで来る場合があるためtextで受けてからparse
   const text = await res.text();
   return JSON.parse(text);
 }
 
 // =====================================================
 // iOSオートズーム対策
-// 入力タップ直前にviewportをロックしてズームを防ぐ
 // =====================================================
 (function preventIOSZoom() {
   const LOCKED   = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
@@ -381,7 +645,6 @@ function calcSatTemp(pressure, list) {
   return '範囲外';
 }
 
-
 function calcSaturationTemp() {
   const refrigerant = document.getElementById('冷媒種').value;
   const list = REFRIGERANT_MAP[refrigerant];
@@ -389,7 +652,6 @@ function calcSaturationTemp() {
   const lowEl  = document.getElementById('低圧飽和温度');
 
   if (!refrigerant) {
-    // 冷媒種未選択：ガイドメッセージを表示
     highEl.value = '';
     highEl.placeholder = '冷媒種を先に選択';
     lowEl.value  = '';
@@ -397,7 +659,6 @@ function calcSaturationTemp() {
     return;
   }
 
-  // 冷媒種選択済み：計算して表示
   highEl.placeholder = '自動';
   lowEl.placeholder  = '自動';
   const highP = parseFloat(document.getElementById('高圧圧力').value);
@@ -450,15 +711,29 @@ function runDiagnosis() {
 }
 
 // =====================================================
-// 保存
+// 保存（二重保存防止 + 編集モード対応）
 // =====================================================
+let isSaving = false;
+let currentEditingId = null;
+let currentEditingRecord = null;
+
 async function handleSave() {
+  // 二重保存防止
+  if (isSaving) return;
+
   if (!document.getElementById('系統').value.trim()) {
     showToast('「系統」を入力してください', 'error');
     return;
   }
 
-  showOverlay('kintone に保存中...');
+  isSaving = true;
+  const btn = document.getElementById('btn-save');
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+
+  const isEdit = currentEditingId !== null;
+  showOverlay(isEdit ? 'kintone を更新中...' : 'kintone に保存中...');
+
   try {
     const txtFields = ['現場名','系統','型式','製造番号','備考'];
     const numFields = ['総合電圧','総合電流','圧縮機_INV','圧縮機_STD1','圧縮機_STD2','FAN1','FAN2',
@@ -481,19 +756,211 @@ async function handleSave() {
       (biko ? biko+'\n\n'+diagText : diagText)
     };
 
-    const res = await callGAS('saveRecord', { record });
-    hideOverlay();
-    showToast(`✅ 保存完了（ID: ${res.id}）`, 'success');
+    let res;
+    if (isEdit) {
+      res = await callGAS('updateRecord', { id: currentEditingId, record });
+      hideOverlay();
+      showToast(`✅ 更新完了（ID: ${currentEditingId}）`, 'success');
+      cancelEdit();  // 編集モード解除
+    } else {
+      res = await callGAS('saveRecord', { record });
+      hideOverlay();
+      showToast(`✅ 保存完了（ID: ${res.id}）`, 'success');
+    }
 
   } catch (err) {
     hideOverlay();
-    showToast('❌ 保存失敗: ' + err.message, 'error');
+    showToast('❌ ' + (isEdit ? '更新' : '保存') + '失敗: ' + err.message, 'error');
     console.error(err);
+  } finally {
+    isSaving = false;
+    btn.disabled = false;
+    btn.textContent = currentEditingId ? '💾 更新保存' : '💾 保存';
   }
 }
 
 // =====================================================
-// UI
+// 過去記録 ボトムシート
+// =====================================================
+let selectedRecord = null;
+
+function openRecordList() {
+  const bg    = document.getElementById('records-bg');
+  const sheet = document.getElementById('records-sheet');
+  const list  = document.getElementById('records-list');
+
+  bg.classList.add('active');
+  // DOMに反映してからアニメーション開始
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => sheet.classList.add('open'));
+  });
+
+  // ローディング表示
+  list.innerHTML = '<div class="sheet-loading">読み込み中...</div>';
+
+  // レコード取得
+  callGAS('getRecords', { limit: 30 })
+    .then(res => renderRecordList(res.records || []))
+    .catch(err => {
+      list.innerHTML = `<div class="sheet-loading" style="color:#ea4335">取得失敗: ${err.message}</div>`;
+    });
+}
+
+function closeRecordList() {
+  const bg    = document.getElementById('records-bg');
+  const sheet = document.getElementById('records-sheet');
+  sheet.classList.remove('open');
+  setTimeout(() => bg.classList.remove('active'), 320);
+}
+
+function formatKintoneDate(isoStr) {
+  if (!isoStr) return '';
+  // "2026-04-15T01:30:00Z" 形式
+  const m = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return isoStr;
+  return `${m[1]}/${m[2]}/${m[3]}`;
+}
+
+function renderRecordList(records) {
+  const list = document.getElementById('records-list');
+  if (!records.length) {
+    list.innerHTML = '<div class="ri-empty">記録がありません</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  records.forEach(rec => {
+    const id     = rec['$id']?.value || '';
+    const dateRaw = rec['$created_at']?.value || rec['日付']?.value || '';
+    const date   = formatKintoneDate(dateRaw);
+    const site   = rec['現場名']?.value || '';
+    const system = rec['系統']?.value   || '（系統未入力）';
+    const model  = rec['型式']?.value   || '';
+
+    const div = document.createElement('div');
+    div.className = 'record-item';
+    div.innerHTML = `
+      <div class="ri-date">${date ? date + '　ID:' + id : 'ID:' + id}</div>
+      <div class="ri-main">${site ? site + ' ／ ' : ''}${system}</div>
+      ${model ? `<div class="ri-sub">${model}</div>` : ''}
+    `;
+    div.addEventListener('click', () => showActionSheet(rec));
+    list.appendChild(div);
+  });
+}
+
+// =====================================================
+// アクションシート
+// =====================================================
+function showActionSheet(rec) {
+  selectedRecord = rec;
+
+  const site   = rec['現場名']?.value || '';
+  const system = rec['系統']?.value   || '（系統未入力）';
+  const model  = rec['型式']?.value   || '';
+  const date   = formatKintoneDate(rec['$created_at']?.value || rec['日付']?.value || '');
+
+  const label = [date, site ? site + ' / ' + system : system, model].filter(Boolean).join('　');
+  document.getElementById('action-rec-label').textContent = label;
+
+  const bg    = document.getElementById('action-bg');
+  const sheet = document.getElementById('action-sheet');
+  bg.classList.add('active');
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => sheet.classList.add('open'));
+  });
+}
+
+function closeActionSheet() {
+  const bg    = document.getElementById('action-bg');
+  const sheet = document.getElementById('action-sheet');
+  sheet.classList.remove('open');
+  setTimeout(() => bg.classList.remove('active'), 280);
+  selectedRecord = null;
+}
+
+function getVal(rec, key) {
+  return rec[key]?.value ?? '';
+}
+
+function setField(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = val ?? '';
+}
+
+// 編集モードで全フィールドを流し込む
+function applyEdit(rec) {
+  const id = rec['$id']?.value;
+  currentEditingId     = id;
+  currentEditingRecord = rec;
+
+  // テキスト系
+  ['現場名','系統','型式','製造番号','備考'].forEach(k => setField(k, getVal(rec, k)));
+  // 数値系
+  ['総合電圧','総合電流','圧縮機_INV','圧縮機_STD1','圧縮機_STD2','FAN1','FAN2',
+   '高圧圧力','低圧圧力','吐出管温度','吸入管温度',
+   '膨張弁入口温度','膨張弁出口温度','室外吸込温度','室外吹出温度'].forEach(k => setField(k, getVal(rec, k)));
+  // セレクト系
+  ['冷媒種','報告書へ掲載する情報'].forEach(k => setField(k, getVal(rec, k)));
+
+  // 飽和温度を再計算
+  calcSaturationTemp();
+  scheduleDiagnosis();
+
+  // 編集バナー表示
+  const site   = getVal(rec, '現場名');
+  const system = getVal(rec, '系統');
+  const label  = [site ? site + ' / ' + system : system, `ID:${id}`].filter(Boolean).join('　');
+  document.getElementById('edit-banner-text').textContent = `✏️ 編集モード　${label}`;
+  document.getElementById('edit-banner').classList.add('active');
+
+  // 保存ボタン更新
+  document.getElementById('btn-save').textContent = '💾 更新保存';
+
+  // 閉じてトップへスクロール
+  closeActionSheet();
+  closeRecordList();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// コピーして新規：基本情報のみ流し込み
+function applyCopy(rec) {
+  currentEditingId     = null;
+  currentEditingRecord = null;
+
+  // 機器情報のみコピー
+  ['現場名','系統','型式','製造番号','冷媒種'].forEach(k => setField(k, getVal(rec, k)));
+
+  // 計測値はクリア
+  ['総合電圧','総合電流','圧縮機_INV','圧縮機_STD1','圧縮機_STD2','FAN1','FAN2',
+   '高圧圧力','低圧圧力','吐出管温度','吸入管温度',
+   '膨張弁入口温度','膨張弁出口温度','室外吸込温度','室外吹出温度','備考'].forEach(k => setField(k, ''));
+  setField('報告書へ掲載する情報', '自動診断');
+
+  calcSaturationTemp();
+  scheduleDiagnosis();
+
+  // 編集バナー非表示
+  document.getElementById('edit-banner').classList.remove('active');
+  document.getElementById('btn-save').textContent = '💾 保存';
+
+  closeActionSheet();
+  closeRecordList();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  showToast('📋 機器情報をコピーしました', 'success');
+}
+
+// 編集モード解除
+function cancelEdit() {
+  currentEditingId     = null;
+  currentEditingRecord = null;
+  document.getElementById('edit-banner').classList.remove('active');
+  document.getElementById('btn-save').textContent = '💾 保存';
+}
+
+// =====================================================
+// UI ユーティリティ
 // =====================================================
 function showOverlay(msg) { document.getElementById('overlay-msg').textContent=msg; document.getElementById('overlay').classList.add('active'); }
 function hideOverlay()    { document.getElementById('overlay').classList.remove('active'); }
@@ -515,9 +982,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('hdate').textContent =
     `${D.getFullYear()}年${D.getMonth()+1}月${D.getDate()}日（${wd}）`;
 
-  // ── イベントリスナー（インラインhandlerを使わず全てここで登録） ──
+  // ── イベントリスナー ──
   document.getElementById('btn-save')
     .addEventListener('click', handleSave);
+
+  document.getElementById('btn-open-records')
+    .addEventListener('click', openRecordList);
+
+  document.getElementById('btn-close-records')
+    .addEventListener('click', closeRecordList);
+
+  document.getElementById('records-bg')
+    .addEventListener('click', closeRecordList);
+
+  document.getElementById('action-bg')
+    .addEventListener('click', closeActionSheet);
+
+  document.getElementById('btn-cancel-action')
+    .addEventListener('click', closeActionSheet);
+
+  document.getElementById('btn-do-edit')
+    .addEventListener('click', () => { if (selectedRecord) applyEdit(selectedRecord); });
+
+  document.getElementById('btn-do-copy')
+    .addEventListener('click', () => { if (selectedRecord) applyCopy(selectedRecord); });
+
+  document.getElementById('btn-cancel-edit')
+    .addEventListener('click', cancelEdit);
 
   document.getElementById('冷媒種')
     .addEventListener('change', () => { calcSaturationTemp(); scheduleDiagnosis(); });
