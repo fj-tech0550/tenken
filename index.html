@@ -120,7 +120,21 @@
     .cancel-edit-btn:active { opacity: 0.7; }
 
     /* ─── セクションカード ─── */
-    .main { padding: 12px; }
+    .main {
+      padding-top: 12px;
+      padding-bottom: 12px;
+      /*
+        画面幅に応じてサイドパディングを調整。
+        350px 前後のコンテンツ幅を維持するため、
+        広い iPhone ほど左右の余白を増やす。
+          SE   (375px): padding ≈ 12px → フォーム幅 351px
+          13   (390px): padding ≈ 20px → フォーム幅 350px
+          Plus (430px): padding = 40px → フォーム幅 350px
+          iPad (768px): padding = 209px → フォーム幅 350px（中央揃え）
+      */
+      padding-left:  max(12px, calc((100vw - 350px) / 2));
+      padding-right: max(12px, calc((100vw - 350px) / 2));
+    }
     .section {
       background: var(--card);
       border-radius: var(--radius);
@@ -713,6 +727,23 @@ function runDiagnosis() {
 }
 
 // =====================================================
+// 全フィールドクリア
+// =====================================================
+function clearAllFields() {
+  ['現場名','系統','型式','製造番号','備考'].forEach(id => setField(id, ''));
+  ['総合電圧','総合電流','圧縮機_INV','圧縮機_STD1','圧縮機_STD2','FAN1','FAN2',
+   '高圧圧力','低圧圧力','高圧飽和温度','低圧飽和温度',
+   '吐出管温度','吸入管温度','膨張弁入口温度','膨張弁出口温度',
+   '室外吸込温度','室外吹出温度'].forEach(id => setField(id, ''));
+  setField('冷媒種', '');
+  setField('報告書へ掲載する情報', '自動診断');
+  // 診断ボックスをリセット
+  const box = document.getElementById('diag-box');
+  box.className = 'diag-box pending';
+  box.textContent = '値を入力すると自動診断します';
+}
+
+// =====================================================
 // 保存（二重保存防止 + 編集モード対応）
 // =====================================================
 let isSaving = false;
@@ -763,11 +794,13 @@ async function handleSave() {
       res = await callGAS('updateRecord', { id: currentEditingId, record });
       hideOverlay();
       showToast(`✅ 更新完了（ID: ${currentEditingId}）`, 'success');
-      cancelEdit();  // 編集モード解除
+      cancelEdit();       // 編集モード解除
+      clearAllFields();   // 入力内容をクリア
     } else {
       res = await callGAS('saveRecord', { record });
       hideOverlay();
       showToast(`✅ 保存完了（ID: ${res.id}）`, 'success');
+      clearAllFields();   // 入力内容をクリア
     }
 
   } catch (err) {
@@ -832,19 +865,23 @@ function renderRecordList(records) {
 
   list.innerHTML = '';
   records.forEach(rec => {
-    const id     = rec['$id']?.value || '';
+    const id      = rec['$id']?.value || '';
     const dateRaw = rec['$created_at']?.value || rec['日付']?.value || '';
-    const date   = formatKintoneDate(dateRaw);
-    const site   = rec['現場名']?.value || '';
-    const system = rec['系統']?.value   || '（系統未入力）';
-    const model  = rec['型式']?.value   || '';
+    const date    = formatKintoneDate(dateRaw);
+    const site    = rec['現場名']?.value   || '';
+    const system  = rec['系統']?.value     || '（系統未入力）';
+    const model   = rec['型式']?.value     || '';
+    const serial  = rec['製造番号']?.value || '';
+
+    // 型式と製造番号を "型式 / 製造番号" 形式でまとめる
+    const modelLine = [model, serial].filter(Boolean).join(' / ');
 
     const div = document.createElement('div');
     div.className = 'record-item';
     div.innerHTML = `
       <div class="ri-date">${date ? date + '　ID:' + id : 'ID:' + id}</div>
       <div class="ri-main">${site ? site + ' ／ ' : ''}${system}</div>
-      ${model ? `<div class="ri-sub">${model}</div>` : ''}
+      ${modelLine ? `<div class="ri-sub">${modelLine}</div>` : ''}
     `;
     div.addEventListener('click', () => showActionSheet(rec));
     list.appendChild(div);
