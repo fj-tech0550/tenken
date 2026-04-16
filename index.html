@@ -210,7 +210,7 @@
     <h1>🌡 空調機点検</h1>
     <div class="hdate" id="hdate"></div>
   </div>
-  <button class="save-btn" onclick="handleSave()">💾 保存</button>
+  <button class="save-btn" id="btn-save">💾 保存</button>
 </header>
 
 <main class="main">
@@ -224,7 +224,7 @@
     <div class="frow"><div class="flabel">製造番号</div><input class="finput" type="text" id="製造番号"></div>
     <div class="frow">
       <div class="flabel">冷媒種</div>
-      <select class="finput" id="冷媒種" onchange="onRefrigerantChange()">
+      <select class="finput" id="冷媒種">
         <option value="">選択してください</option>
         <option value="R22">R22</option>
         <option value="R32">R32</option>
@@ -239,11 +239,11 @@
   <div class="section">
     <div class="section-head sh-red">🔴 圧力・飽和温度</div>
     <div class="pair-row">
-      <div class="pair-cell"><div class="pair-label">高圧圧力</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="高圧圧力" placeholder="0.00" step="0.01" oninput="onPressureChange()"><span class="pair-unit">MPa</span></div></div>
+      <div class="pair-cell"><div class="pair-label">高圧圧力</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="高圧圧力" placeholder="0.00" step="0.01"><span class="pair-unit">MPa</span></div></div>
       <div class="pair-cell"><div class="pair-label">高圧飽和温度</div><div class="pair-input-wrap"><input class="pinput calc" type="text" id="高圧飽和温度" readonly placeholder="自動"><span class="pair-unit">℃</span></div></div>
     </div>
     <div class="pair-row">
-      <div class="pair-cell"><div class="pair-label">低圧圧力</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="低圧圧力" placeholder="0.00" step="0.01" oninput="onPressureChange()"><span class="pair-unit">MPa</span></div></div>
+      <div class="pair-cell"><div class="pair-label">低圧圧力</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="低圧圧力" placeholder="0.00" step="0.01"><span class="pair-unit">MPa</span></div></div>
       <div class="pair-cell"><div class="pair-label">低圧飽和温度</div><div class="pair-input-wrap"><input class="pinput calc" type="text" id="低圧飽和温度" readonly placeholder="自動"><span class="pair-unit">℃</span></div></div>
     </div>
   </div>
@@ -252,7 +252,7 @@
   <div class="section">
     <div class="section-head sh-green">🌡 管温度</div>
     <div class="pair-row">
-      <div class="pair-cell"><div class="pair-label">吐出管温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="吐出管温度" placeholder="0.0" step="0.1" oninput="scheduleDiagnosis()"><span class="pair-unit">℃</span></div></div>
+      <div class="pair-cell"><div class="pair-label">吐出管温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="吐出管温度" placeholder="0.0" step="0.1"><span class="pair-unit">℃</span></div></div>
       <div class="pair-cell"><div class="pair-label">吸入管温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="吸入管温度" placeholder="0.0" step="0.1"><span class="pair-unit">℃</span></div></div>
     </div>
     <div class="pair-row">
@@ -260,7 +260,7 @@
       <div class="pair-cell"><div class="pair-label">膨張弁出口温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="膨張弁出口温度" placeholder="0.0" step="0.1"><span class="pair-unit">℃</span></div></div>
     </div>
     <div class="pair-row">
-      <div class="pair-cell"><div class="pair-label">室外吸込温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="室外吸込温度" placeholder="0.0" step="0.1" oninput="scheduleDiagnosis()"><span class="pair-unit">℃</span></div></div>
+      <div class="pair-cell"><div class="pair-label">室外吸込温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="室外吸込温度" placeholder="0.0" step="0.1"><span class="pair-unit">℃</span></div></div>
       <div class="pair-cell"><div class="pair-label">室外吹出温度</div><div class="pair-input-wrap"><input class="pinput" type="number" inputmode="decimal" id="室外吹出温度" placeholder="0.0" step="0.1"><span class="pair-unit">℃</span></div></div>
     </div>
   </div>
@@ -377,8 +377,6 @@ function calcSatTemp(pressure, list) {
   return '範囲外';
 }
 
-function onRefrigerantChange() { calcSaturationTemp(); scheduleDiagnosis(); }
-function onPressureChange()    { calcSaturationTemp(); scheduleDiagnosis(); }
 
 function calcSaturationTemp() {
   const refrigerant = document.getElementById('冷媒種').value;
@@ -508,16 +506,34 @@ function showToast(msg, type) {
 // 初期化
 // =====================================================
 document.addEventListener('DOMContentLoaded', async () => {
+  // ── 日付表示 ──
   const D=new Date(), wd=['日','月','火','水','木','金','土'][D.getDay()];
   document.getElementById('hdate').textContent =
     `${D.getFullYear()}年${D.getMonth()+1}月${D.getDate()}日（${wd}）`;
 
-  // 診断ルール取得
+  // ── イベントリスナー（インラインhandlerを使わず全てここで登録） ──
+  document.getElementById('btn-save')
+    .addEventListener('click', handleSave);
+
+  document.getElementById('冷媒種')
+    .addEventListener('change', () => { calcSaturationTemp(); scheduleDiagnosis(); });
+
+  ['高圧圧力','低圧圧力'].forEach(id => {
+    document.getElementById(id)
+      .addEventListener('input', () => { calcSaturationTemp(); scheduleDiagnosis(); });
+  });
+
+  ['吐出管温度','室外吸込温度'].forEach(id => {
+    document.getElementById(id)
+      .addEventListener('input', scheduleDiagnosis);
+  });
+
+  // ── 診断ルール取得 ──
   try {
     const data = await callGAS('getDiagRules');
     diagRules   = data.rules || [];
     rulesLoaded = true;
-  } catch {
+  } catch(e) {
     diagRules   = [];
     rulesLoaded = true;
   }
