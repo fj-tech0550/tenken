@@ -40,6 +40,9 @@
       min-height: 100vh;
       padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
       -webkit-font-smoothing: antialiased;
+      /* iPhone SE など狭い画面での横スクロール防止 */
+      overflow-x: hidden;
+      width: 100%;
     }
 
     /* ─── ヘッダー ─── */
@@ -66,8 +69,8 @@
       color: #fff;
       border: 1.5px solid rgba(255,255,255,0.5);
       border-radius: 22px;
-      padding: 10px 20px;
-      font-size: 18px;
+      padding: 10px 16px;
+      font-size: 17px;
       font-weight: 700;
       cursor: pointer;
       white-space: nowrap;
@@ -76,6 +79,12 @@
       touch-action: manipulation;
     }
     .rec-btn:active { opacity: 0.7; }
+    /* iPhone SE (375px) でヘッダーが溢れないように */
+    @media (max-width: 380px) {
+      .header-left h1   { font-size: 21px; }
+      .header-left .hdate { font-size: 14px; }
+      .rec-btn { font-size: 15px; padding: 9px 12px; }
+    }
 
     /* ─── 編集モードバナー ─── */
     .edit-banner {
@@ -118,6 +127,9 @@
       margin-bottom: 14px;
       overflow: hidden;
       box-shadow: 0 1px 4px rgba(0,0,0,0.09);
+      /* 横幅をビューポートに収める */
+      max-width: 100%;
+      min-width: 0;
     }
     .section-head {
       padding: 14px 16px;
@@ -181,8 +193,8 @@
     textarea.finput { height: 100px; padding: 14px; resize: none; line-height: 1.6; }
 
     /* ─── ペア行（2列） ─── */
-    .pair-row { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); }
-    .pair-cell { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .pair-row { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); max-width: 100%; min-width: 0; overflow: hidden; }
+    .pair-cell { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow: hidden; }
     .pair-cell + .pair-cell { border-left: 1px solid var(--border); }
     .pair-label { font-size: 18px; color: var(--sub); line-height: 1.2; }
     .pair-input-wrap { display: flex; align-items: center; gap: 5px; }
@@ -604,24 +616,12 @@ async function callGAS(action, params = {}) {
 
 // =====================================================
 // iOSオートズーム対策
+// 全入力欄が font-size: 20px（≥16px）なので
+// iOS のオートズームは自然に発生しない。
+// 以前あった viewport 動的書き換え（user-scalable=no）は
+// focusout が正常に発火しない場合にピンチ操作を
+// 完全封鎖するバグを生んでいたため削除済み。
 // =====================================================
-(function preventIOSZoom() {
-  const LOCKED   = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
-  const UNLOCKED = 'width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover';
-
-  document.addEventListener('touchstart', (e) => {
-    const tag = e.target.tagName;
-    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
-      document.querySelector('meta[name=viewport]')?.setAttribute('content', LOCKED);
-    }
-  }, { passive: true });
-
-  document.addEventListener('focusout', () => {
-    setTimeout(() => {
-      document.querySelector('meta[name=viewport]')?.setAttribute('content', UNLOCKED);
-    }, 300);
-  });
-})();
 
 // =====================================================
 // 飽和温度テーブル（howaondo2.js より移植）
