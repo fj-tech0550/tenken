@@ -310,23 +310,27 @@
 // =====================================================
 // ★ GAS エンドポイントURL（デプロイ後に書き換える）
 // =====================================================
-const GAS_ENDPOINT = 'const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxY9uV845y4Ul_OJb3uPdNlk2BF7M_x7Fq3eVFYVjts3E_kTihk6wsMI5GJE-gF6dMRig/exec';
-';
+const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxY9uV845y4Ul_OJb3uPdNlk2BF7M_x7Fq3eVFYVjts3E_kTihk6wsMI5GJE-gF6dMRig/exec';
 // 例: 'https://script.google.com/macros/s/AKfycbxxxxxxxxxxxxxxxx/exec'
 
 // =====================================================
-// GAS API 呼び出しユーティリティ
-// Content-Type: text/plain でプリフライトを回避しつつCORSを通す
+// GAS API 呼び出しユーティリティ（GET版）
+//
+// GASは302リダイレクトを使うため、POSTだとブラウザが
+// リダイレクト後にGETへ変換しボディが消える。
+// GETにしてURLパラメータで送ることで確実に動作する。
 // =====================================================
 async function callGAS(action, params = {}) {
-  const res = await fetch(GAS_ENDPOINT, {
-    method:   'POST',
-    redirect: 'follow',
-    headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
-    body:     JSON.stringify({ action, ...params })
-  });
+  const url = new URL(GAS_ENDPOINT);
+  url.searchParams.set('action', action);
+  if (Object.keys(params).length > 0) {
+    url.searchParams.set('data', JSON.stringify(params));
+  }
+  const res = await fetch(url.toString(), { redirect: 'follow' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+  // GASのレスポンスはtext/plainで来る場合があるためtextで受けてからparse
+  const text = await res.text();
+  return JSON.parse(text);
 }
 
 // =====================================================
@@ -377,9 +381,27 @@ function onRefrigerantChange() { calcSaturationTemp(); scheduleDiagnosis(); }
 function onPressureChange()    { calcSaturationTemp(); scheduleDiagnosis(); }
 
 function calcSaturationTemp() {
-  const list = REFRIGERANT_MAP[document.getElementById('冷媒種').value];
-  document.getElementById('高圧飽和温度').value = list ? calcSatTemp(parseFloat(document.getElementById('高圧圧力').value), list) : '';
-  document.getElementById('低圧飽和温度').value = list ? calcSatTemp(parseFloat(document.getElementById('低圧圧力').value), list) : '';
+  const refrigerant = document.getElementById('冷媒種').value;
+  const list = REFRIGERANT_MAP[refrigerant];
+  const highEl = document.getElementById('高圧飽和温度');
+  const lowEl  = document.getElementById('低圧飽和温度');
+
+  if (!refrigerant) {
+    // 冷媒種未選択：ガイドメッセージを表示
+    highEl.value = '';
+    highEl.placeholder = '冷媒種を先に選択';
+    lowEl.value  = '';
+    lowEl.placeholder  = '冷媒種を先に選択';
+    return;
+  }
+
+  // 冷媒種選択済み：計算して表示
+  highEl.placeholder = '自動';
+  lowEl.placeholder  = '自動';
+  const highP = parseFloat(document.getElementById('高圧圧力').value);
+  const lowP  = parseFloat(document.getElementById('低圧圧力').value);
+  highEl.value = list ? calcSatTemp(highP, list) : '';
+  lowEl.value  = list ? calcSatTemp(lowP,  list) : '';
 }
 
 // =====================================================
