@@ -6,7 +6,7 @@
     GitHub Pages版：viewportを静的メタで確実に設定
     GASのラッパーがないため width=device-width が正しく機能する
   -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="空調点検">
@@ -31,7 +31,14 @@
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    html {
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+      /* overflow-x: clip は scroll container を作らないため
+         Safari の body 幅バグや sticky 位置ずれを起こさずに
+         横はみ出しを確実にクリップできる（iOS Safari 15.4+） */
+      overflow-x: clip;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
       background: var(--bg);
@@ -117,13 +124,7 @@
     .cancel-edit-btn:active { opacity: 0.7; }
 
     /* ─── セクションカード ─── */
-    .main {
-      padding: 12px;
-      /* iPhone（〜430px）はフル幅。タブレット以上は中央寄せ */
-      max-width: 480px;
-      margin-left: auto;
-      margin-right: auto;
-    }
+    .main { padding: 12px; }
     .section {
       background: var(--card);
       border-radius: var(--radius);
