@@ -60,6 +60,21 @@
     .st{font-size:12px;font-weight:700;padding:1px 7px;border-radius:6px;margin-left:6px;vertical-align:3px}
     .st.s0{background:var(--ic-gray-bg);color:var(--ic-sub)}.st.s1{background:var(--ic-warn-bg);color:var(--ic-warn)}.st.s2{background:var(--ic-ok-bg);color:var(--ic-ok)}
     .ghost{width:100%;border:1.5px dashed var(--ic-primary);color:var(--ic-primary);background:transparent;border-radius:12px;padding:14px;font-size:17px;font-weight:700;margin-top:12px}
+    /* 住所・連絡先カード */
+    .addr{width:100%;border:0;text-align:left;background:var(--ic-card);border-radius:14px;box-shadow:0 1px 4px rgba(0,0,0,.09);padding:12px 14px;margin-bottom:12px;display:flex;flex-direction:column;gap:4px;color:var(--ic-text)}
+    .addr .t{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;color:var(--ic-sub)}
+    .addr .t .go{margin-left:auto;color:var(--ic-primary);font-size:15px}
+    .addr .v{font-size:17px;line-height:1.45;word-break:break-all}
+    .addr .v.none{color:var(--ic-sub)}
+    .tag{font-size:12px;font-weight:700;padding:1px 8px;border-radius:6px}
+    .tag.ok{background:var(--ic-ok-bg);color:var(--ic-ok)}.tag.warn{background:var(--ic-warn-bg);color:var(--ic-warn)}.tag.bad{background:var(--ic-bad-bg);color:var(--ic-bad)}
+    .note{background:#e8f0fe;border-radius:12px;padding:12px;font-size:15px;line-height:1.5;display:flex;flex-direction:column;gap:8px}
+    .note.warn{background:var(--ic-warn-bg)}
+    .note b{font-weight:800}
+    .pick{border:1.5px solid var(--ic-border);background:var(--ic-card);color:var(--ic-text);border-radius:10px;padding:10px 12px;text-align:left;font-size:15px;line-height:1.4}
+    .pick small{display:block;color:var(--ic-sub)}
+    .ic-btn.sub{background:var(--ic-card);border:1.5px solid var(--ic-primary);color:var(--ic-primary);flex:1}
+    .btns{display:flex;flex-direction:column;gap:8px}
     .msg{padding:40px 16px;text-align:center;color:var(--ic-sub);font-size:17px}
     .msg.err{color:var(--ic-bad)}
     .msg button{margin-top:12px}
@@ -139,6 +154,7 @@ const S = {
   group: null, machines: null, mErr: '', filter: 'all', mi: -1,
   sheet: null
 };
+const AD = { addr: '', tel: '', step: 'edit' };   // 住所・連絡先シート
 const ng = { date: '', site: '', type: C.INSPECT_TYPES[0], name: '', edited: false, inherit: true };
 const $app = document.getElementById('app'), $layer = document.getElementById('layer');
 const esc = C.esc;
@@ -151,7 +167,24 @@ function toMachine(rec) {
   m.id = rec['$id'].value;
   if (m.v.冷媒種) C.updateSat(m);
   m.dirty = false;
+  // 報告書に載せる住所・電話番号（入力画面では扱わず、グループ画面から一括で入れる）
+  m.addr = (rec['報告書へ記載する住所'] && rec['報告書へ記載する住所'].value) || '';
+  m.tel  = (rec['報告書へ記載する電話番号'] && rec['報告書へ記載する電話番号'].value) || '';
   return m;
+}
+const addrKey = x => (x.addr || '') + '\u0001' + (x.tel || '');
+const hasAddr = x => !!((x.addr || '').trim() || (x.tel || '').trim());
+// グループ内の住所の入力状況：values=入力済みの住所の種類（台数の多い順）, empty=未入力の台数
+function addrStat() {
+  const map = new Map(); let empty = 0;
+  (S.machines || []).forEach(m => {
+    if (!hasAddr(m)) { empty++; return; }
+    const k = addrKey(m); if (!map.has(k)) map.set(k, { addr: m.addr, tel: m.tel, count: 0 }); map.get(k).count++;
+  });
+  return { values: [...map.values()].sort((a, b) => b.count - a.count), empty, total: (S.machines || []).length };
+}
+function addrRecord(addr, tel) {
+  return { 報告書へ記載する住所: { value: addr }, 報告書へ記載する電話番号: { value: tel } };
 }
 function groupFields(g) {
   return { 点検グループ: { value: g.name }, 日付: { value: g.date }, 現場名: { value: g.site }, 点検種類: { value: g.type } };
@@ -220,7 +253,12 @@ function groupHTML() {
         <div class="mid"><b>${esc(m.v.系統 || '（系統未入力）')}<span class="st s${s}">${C.STATUS_LABEL[s]}</span></b><span>${esc(m.v.型式 || '型式未入力')}${m.v.製造番号 ? ' / ' + esc(m.v.製造番号) : ''}</span></div>
         <div class="rt"><div class="big">${p.done}<small>/${p.total}</small></div><div class="iu">室内機 ${p.iDone}/${p.iTotal}台</div></div></button>`;
     }).join('') || `<div class="msg">${ms.length ? '未完了の機器はありません' : 'まだ機器がありません'}</div>`;
-    body = `<div class="sum"><div><b style="color:var(--ic-ok)">${cnt[2]}</b><span>完了</span></div><div><b style="color:var(--ic-warn)">${cnt[1]}</b><span>入力中</span></div><div><b>${cnt[0]}</b><span>未着手</span></div></div>
+    const st = addrStat(), v0 = st.values[0];
+    const tag = !st.total ? '' : st.values.length > 1 ? '<span class="tag bad">複数の住所</span>'
+      : !v0 ? '<span class="tag warn">未入力</span>' : st.empty ? `<span class="tag warn">${st.total - st.empty}/${st.total}台に入力</span>` : '<span class="tag ok">全台入力済み</span>';
+    const addrCard = `<button class="addr" data-act="addr"><div class="t">📍 報告書の住所・連絡先 ${tag}<span class="go">${v0 ? '変更 ›' : '入力 ›'}</span></div>
+      ${v0 ? `<div class="v">${esc(v0.addr || '（住所なし）')}<br>TEL ${esc(v0.tel || '—')}</div>` : '<div class="v none">報告書に載せる住所・電話番号を入力してください</div>'}</button>`;
+    body = addrCard + `<div class="sum"><div><b style="color:var(--ic-ok)">${cnt[2]}</b><span>完了</span></div><div><b style="color:var(--ic-warn)">${cnt[1]}</b><span>入力中</span></div><div><b>${cnt[0]}</b><span>未着手</span></div></div>
       <div class="seg"><button data-act="flt" data-v="all" aria-pressed="${S.filter === 'all'}">すべて ${ms.length}</button><button data-act="flt" data-v="todo" aria-pressed="${S.filter === 'todo'}">未完了 ${cnt[0] + cnt[1]}</button></div>
       <div class="list">${rows}</div><button class="ghost" data-act="add-m">＋ 機器を追加</button><div style="height:24px"></div>`;
   }
@@ -255,7 +293,7 @@ function inheritHTML() {
   const pg = ng.site.trim() && prevGroupOf(ng.site, ng.edited ? ng.name : ngName());
   if (!pg) return '';
   return `<label class="inherit"><input type="checkbox" id="ng-inh" ${ng.inherit ? 'checked' : ''}>
-    <span>前回（${slash(pg.date)}点検）の機器 ${pg.total}台を引き継ぐ<small>系統・型式・製造番号・冷媒種・対象外・室内機の型式/製番をコピー。測定値は空で始まります</small></span></label>`;
+    <span>前回（${slash(pg.date)}点検）の機器 ${pg.total}台を引き継ぐ<small>系統・型式・製造番号・冷媒種・対象外・室内機の型式/製番・報告書の住所/電話番号をコピー。測定値は空で始まります</small></span></label>`;
 }
 function renderSheet() {
   if (!S.sheet) { $layer.innerHTML = ''; return; }
@@ -268,6 +306,37 @@ function renderSheet() {
       <div class="preview"><span>グループ名（自動・編集可）</span><input id="ng-name" value="${esc(ng.edited ? ng.name : ngName())}" placeholder="現場名を入れると自動で作られます"></div>
       <div id="ng-inh-slot">${inheritHTML()}</div>
       <button class="ic-btn pri" data-act="ng-create">作成する</button></div>`;
+  }
+  if (S.sheet === 'addr') {
+    const st = addrStat();
+    let html;
+    if (AD.step === 'confirm') {
+      const conf = st.values.filter(x => addrKey(x) !== addrKey(AD));
+      const nConf = conf.reduce((a, x) => a + x.count, 0);
+      html = `<h3>上書きの確認</h3>
+        <div class="note warn"><div><b>${nConf}台</b>に別の住所が入力されています。この住所を上書きしてよろしいですか？</div>
+          ${conf.map(x => `<div class="pick" style="background:transparent">${esc(x.addr || '（住所なし）')}<small>TEL ${esc(x.tel || '—')} ・ ${x.count}台</small></div>`).join('')}</div>
+        <div class="note"><div>新しい住所</div><div><b>${esc(AD.addr || '（住所なし）')}</b><br>TEL ${esc(AD.tel || '—')}</div></div>
+        <div class="btns"><button class="ic-btn pri" data-act="addr-do" data-mode="all">上書きして全台（${st.total}台）に適用</button>
+          ${st.empty ? `<button class="ic-btn sub" data-act="addr-do" data-mode="empty">未入力の ${st.empty}台だけに適用</button>` : ''}
+          <button class="ic-btn" data-act="addr-back">戻る</button></div>`;
+    } else {
+      let info = '';
+      if (st.values.length === 1 && st.empty) {
+        const x = st.values[0];
+        info = `<div class="note"><div><b>${x.count}台</b>に入力済みの住所があります。グループ内の全レコード（未入力 ${st.empty}台）にこの住所を適用しますか？</div>
+          <div><b>${esc(x.addr || '（住所なし）')}</b><br>TEL ${esc(x.tel || '—')}</div>
+          <button class="ic-btn pri" data-act="addr-do" data-mode="fill">この住所を未入力の ${st.empty}台に適用</button></div>`;
+      } else if (st.values.length > 1) {
+        info = `<div class="note warn"><div>グループ内に<b>${st.values.length}種類</b>の住所が入力されています。どれかを選ぶと下の欄に入ります。</div>
+          ${st.values.map((x, i) => `<button class="pick" data-act="addr-pick" data-i="${i}">${esc(x.addr || '（住所なし）')}<small>TEL ${esc(x.tel || '—')} ・ ${x.count}台</small></button>`).join('')}</div>`;
+      }
+      html = `<h3>報告書の住所・連絡先</h3>${info}
+        <label>住所<input class="ic-fi" id="ad-addr" value="${esc(AD.addr)}" placeholder="例：静岡県浜松市西区西山町" autocomplete="off"></label>
+        <label>電話番号<input class="ic-fi" id="ad-tel" type="tel" value="${esc(AD.tel)}" placeholder="例：053-000-0000" autocomplete="off"></label>
+        <button class="ic-btn pri" data-act="addr-apply">グループ全台（${st.total}台）に適用</button>`;
+    }
+    $layer.innerHTML = `<div class="sheet-bd" data-act="close"></div><div class="sheet" role="dialog" aria-label="報告書の住所・連絡先"><div class="grab"></div>${html}</div>`;
   }
   if (S.sheet === 'add-m') {
     $layer.innerHTML = `<div class="sheet-bd" data-act="close"></div><div class="sheet" role="dialog" aria-label="機器を追加"><div class="grab"></div><h3>機器を追加</h3>
@@ -344,28 +413,13 @@ async function createGroup() {
         ['系統','型式','製造番号','冷媒種'].forEach(c => { n.v[c] = o.v[c]; });
         n.na = new Set(o.na);
         n.indoor = o.indoor.map(r => Object.assign(C.blankRow(), { 型式: r.型式, 製造番号: r.製造番号 }));
-        const out = Object.assign(C.toRecord(n), groupFields(g));
-        // 訪問先ルックアップと報告書の住所区分も引き継ぐ（保存時に kintone がアプリ31から住所・電話番号を取り込む）
-        if (rec['ルックアップ'] && rec['ルックアップ'].value) out['ルックアップ'] = { value: rec['ルックアップ'].value };
-        if (rec['報告書へ記載する住所及び連絡先'] && rec['報告書へ記載する住所及び連絡先'].value)
-          out['報告書へ記載する住所及び連絡先'] = { value: rec['報告書へ記載する住所及び連絡先'].value };
-        return out;
+        // 報告書の住所・電話番号も前回から引き継ぐ
+        const pm = toMachine(rec);
+        return Object.assign(C.toRecord(n), groupFields(g), addrRecord(pm.addr, pm.tel));
       });
-      let lookupFailed = false;
-      for (let i = 0; i < recs.length; i += 100) {
-        const chunk = recs.slice(i, i + 100);
-        try { await callGAS('saveRecords', { records: chunk }, true); }
-        catch (err) {
-          // 参照先（アプリ31）の訪問先が削除されている等でルックアップが失敗した場合は、ルックアップ無しで作り直す
-          if (!chunk.some(r => r['ルックアップ'])) throw err;
-          lookupFailed = true;
-          chunk.forEach(r => { delete r['ルックアップ']; });
-          await callGAS('saveRecords', { records: chunk }, true);
-        }
-      }
+      for (let i = 0; i < recs.length; i += 100) await callGAS('saveRecords', { records: recs.slice(i, i + 100) }, true);
       overlay(''); S.sheet = null;
-      toast(lookupFailed ? `作成しました（機器 ${recs.length}台）。訪問先の引き継ぎに失敗したため、kintone で訪問先を選び直してください`
-                         : `✅ 作成しました（機器 ${recs.length}台）`, lookupFailed ? 'error' : 'success');
+      toast(`✅ 作成しました（機器 ${recs.length}台）`, 'success');
       S.localGroups.push(g); openGroup(g);
     } catch (e) { overlay(''); toast('❌ 作成できませんでした：' + e.message, 'error'); }
     return;
@@ -381,12 +435,38 @@ async function addMachine() {
   ['系統','型式','製造番号','冷媒種'].forEach(c => { n.v[c] = val(c); });
   overlay('機器を登録中...');
   try {
-    const res = await callGAS('saveRecord', { record: Object.assign(C.toRecord(n), groupFields(S.group)) }, true);
+    const st = addrStat(), a = st.values.length === 1 ? st.values[0] : { addr: '', tel: '' };
+    const res = await callGAS('saveRecord', { record: Object.assign(C.toRecord(n), groupFields(S.group), addrRecord(a.addr, a.tel)) }, true);
     S.machines.push(toMachine(res.record));
     S.mi = S.machines.length - 1; S.sheet = null; S.screen = 'input'; render(); updSaveBtn();
     toast('✅ 登録しました', 'success');
   } catch (e) { toast('❌ 登録できませんでした：' + e.message, 'error'); }
   finally { overlay(''); }
+}
+
+async function applyAddr(mode) {
+  const ms = S.machines || [];
+  let addr = AD.addr.trim(), tel = AD.tel.trim();
+  if (mode === 'fill') { const v0 = addrStat().values[0]; addr = v0.addr; tel = v0.tel; }
+  const key = addrKey({ addr, tel });
+  const targets = ms.filter(m => addrKey(m) !== key && (mode === 'all' || !hasAddr(m)));
+  if (!targets.length) { S.sheet = null; renderSheet(); toast('変更はありません'); return; }
+  overlay(`${targets.length}台に住所を適用中...`);
+  try {
+    const recs = targets.map(m => ({ id: m.id, record: addrRecord(addr, tel) }));
+    for (let i = 0; i < recs.length; i += 100) await callGAS('updateRecords', { records: recs.slice(i, i + 100) }, true);
+    targets.forEach(m => { m.addr = addr; m.tel = tel; });
+    S.sheet = null; render();
+    toast(`✅ ${targets.length}台に適用しました`, 'success');
+  } catch (e) { toast('❌ 適用できませんでした：' + e.message, 'error'); }
+  finally { overlay(''); }
+}
+function startApply() {
+  AD.addr = AD.addr.trim(); AD.tel = AD.tel.trim();
+  if (!AD.addr && !AD.tel) { toast('住所か電話番号を入力してください', 'error'); return; }
+  const key = addrKey(AD);
+  const conflict = (S.machines || []).some(m => hasAddr(m) && addrKey(m) !== key);
+  if (conflict) { AD.step = 'confirm'; renderSheet(); } else applyAddr('all');
 }
 
 // =====================================================
@@ -417,6 +497,11 @@ async function onAct(e) {
     case 'save':    if (await saveCurrent(false)) { render(); updSaveBtn(); } break;
     case 'new-g':   Object.assign(ng, { date: today(), site: '', type: C.INSPECT_TYPES[0], name: '', edited: false, inherit: true }); S.sheet = 'new-g'; renderSheet(); break;
     case 'add-m':   S.sheet = 'add-m'; renderSheet(); break;
+    case 'addr':    { const v0 = addrStat().values[0] || { addr: '', tel: '' }; Object.assign(AD, { addr: v0.addr, tel: v0.tel, step: 'edit' }); S.sheet = 'addr'; renderSheet(); break; }
+    case 'addr-pick': { const x = addrStat().values[+b.dataset.i]; AD.addr = x.addr; AD.tel = x.tel; renderSheet(); break; }
+    case 'addr-apply': startApply(); break;
+    case 'addr-back': AD.step = 'edit'; renderSheet(); break;
+    case 'addr-do':   applyAddr(b.dataset.mode); break;
     case 'close':   S.sheet = null; renderSheet(); break;
     case 'ng-create': createGroup(); break;
     case 'am-create': addMachine(); break;
@@ -434,6 +519,8 @@ $app.addEventListener('input', e => {
 });
 $layer.addEventListener('input', e => {
   const t = e.target;
+  if (t.id === 'ad-addr') { AD.addr = t.value; return; }
+  if (t.id === 'ad-tel')  { AD.tel = t.value; return; }
   if (t.id === 'ng-date') ng.date = t.value;
   if (t.id === 'ng-site') ng.site = t.value;
   if (t.id === 'ng-type') ng.type = t.value;
