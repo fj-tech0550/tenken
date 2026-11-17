@@ -154,6 +154,26 @@
     return out;
   };
 
+  // ───────── 過去の点検から機器を引き継いだ新しいレコードを作る（WEBアプリ・kintone 共通） ─────────
+  // 機器の情報（報告書に載るもの）はコピーし、測定値・目視点検・特記事項は空で始める
+  C.MACHINE_ATTRS = ['メーカー','冷媒量','納入年月','圧縮機出力','VベルトAB','ベルトサイズ','ベルト本数','Watt','Voltage','ControlType','PowerType','Frequency'];
+  C.REPORT_ADDR = ['報告書へ記載する住所','報告書へ記載する電話番号'];
+  C.inheritRecord = function (rec, g) {   // g = {name, date, site, type}
+    const o = C.fromRecord(rec), n = C.emptyModel();
+    ['系統','型式','製造番号','冷媒種'].forEach(c => { n.v[c] = o.v[c]; });
+    n.na = new Set(o.na);
+    n.indoor = o.indoor.map(r => Object.assign(C.blankRow(), { 型式: r.型式, 製造番号: r.製造番号 }));
+    const out = C.toRecord(n);
+    C.MACHINE_ATTRS.concat(C.REPORT_ADDR).forEach(c => {
+      if (rec[c] && rec[c].value !== '' && rec[c].value != null) out[c] = { value: rec[c].value };
+    });
+    out['点検グループ'] = { value: g.name };
+    out['日付']       = { value: g.date };
+    out['現場名']     = { value: g.site };
+    if (g.type) out['点検種類'] = { value: g.type };
+    return out;
+  };
+
   // ───────── 入力進捗 ─────────
   C.progress = function (m) {
     const target = C.PF.filter(c => !m.na.has(c));

@@ -430,7 +430,7 @@ function inheritHTML() {
       <div class="mlist">${list}</div>`;
   }
   return `<div class="inhbox"><label class="inherit"><input type="checkbox" id="ng-inh" ${ng.inherit ? 'checked' : ''}>
-    <span>過去の点検から機器を引き継ぐ<small>選んだ機器の 系統・型式・製造番号・冷媒種・対象外・室内機の型式/製番・報告書の住所/電話番号をコピー。測定値は空で始まります</small></span></label>${body}</div>`;
+    <span>過去の点検から機器を引き継ぐ<small>選んだ機器の 系統・型式・製造番号・冷媒種・メーカー・冷媒量・納入年月など機器の情報、対象外、室内機の型式/製番、報告書の住所/電話番号をコピー。測定値は空で始まります</small></span></label>${body}</div>`;
 }
 function renderSheet() {
   if (!S.sheet) { $layer.innerHTML = ''; return; }
@@ -611,15 +611,7 @@ async function createGroup() {
   if (src.length) {
     overlay(`機器 ${src.length}台を引き継いでいます...`);
     try {
-      const recs = src.map(rec => {
-        const o = C.fromRecord(rec), n = C.emptyModel();
-        ['系統','型式','製造番号','冷媒種'].forEach(c => { n.v[c] = o.v[c]; });
-        n.na = new Set(o.na);
-        n.indoor = o.indoor.map(r => Object.assign(C.blankRow(), { 型式: r.型式, 製造番号: r.製造番号 }));
-        // 報告書の住所・電話番号も前回から引き継ぐ
-        const pm = toMachine(rec);
-        return Object.assign(C.toRecord(n), groupFields(g), addrRecord(pm.addr, pm.tel));
-      });
+      const recs = src.map(rec => C.inheritRecord(rec, g));   // 機器情報・住所をコピー、測定値は空
       for (let i = 0; i < recs.length; i += 100) await callGAS('saveRecords', { records: recs.slice(i, i + 100) }, true);
       overlay(''); S.sheet = null;
       toast(`✅ 作成しました（機器 ${recs.length}台）`, 'success');
