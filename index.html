@@ -91,6 +91,17 @@
     .preview span{font-size:13px;color:#1a56db;font-weight:700}
     .preview input{border:0;background:transparent;font-size:18px;font-weight:800;color:var(--ic-text);padding:0;outline:none;width:100%;font-family:inherit}
     .inherit{display:flex !important;flex-direction:row !important;gap:10px;align-items:flex-start;border:1.5px solid var(--ic-ok);background:var(--ic-ok-bg);border-radius:12px;padding:12px;font-size:15px;color:var(--ic-text) !important;font-weight:600 !important}
+    .inhbox{display:flex;flex-direction:column;gap:10px}
+    .sheet label.mchk{flex-direction:row;align-items:center;gap:12px;padding:10px 12px;border-top:1px solid var(--ic-border);color:var(--ic-text);font-weight:400}
+    .sheet label.mchk:first-child{border-top:0}
+    .mchk input{width:22px;height:22px;flex-shrink:0;accent-color:#1a73e8}
+    .mchk b{display:block;font-size:16px}
+    .mchk small{color:var(--ic-sub);font-size:13px}
+    .mlist{border:1.5px solid var(--ic-border);border-radius:12px;max-height:38vh;overflow-y:auto}
+    .mlist:empty{display:none}
+    .mhead{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ic-sub);font-weight:700}
+    .mhead span{flex:1}
+    .mhead button{border:1px solid var(--ic-border);background:var(--ic-card);color:var(--ic-primary);border-radius:8px;padding:6px 10px;font-size:13px;font-weight:700}
     .inherit input{width:22px;height:22px;margin-top:1px;accent-color:#137333;flex-shrink:0}
     .inherit small{display:block;color:var(--ic-sub);font-weight:400}
     /* オーバーレイ・トースト */
@@ -157,7 +168,8 @@ const S = {
   sheet: null
 };
 const AD = { addr: '', tel: '', step: 'edit' };   // 住所・連絡先シート
-const ng = { date: '', site: '', type: C.INSPECT_TYPES[0], name: '', edited: false, inherit: true };
+const ng = { date: '', site: '', type: C.INSPECT_TYPES[0], name: '', edited: false, inherit: true, src: '', sel: null };
+const NG_SRC = { cache: {}, loading: '' };   // 引き継ぎ元グループのレコード（グループ名ごとに保持）
 const $app = document.getElementById('app'), $layer = document.getElementById('layer');
 const esc = C.esc;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -360,15 +372,65 @@ function updSaveBtn() {
 }
 
 // ── シート ──
-function prevGroupOf(site, exceptName) {
-  return allGroups().filter(g => g.site === site.trim() && g.name !== exceptName && (g.total || 0) > 0)[0];
+// ── 引き継ぎ：引き継ぎ元のグループと、引き継ぐ機器を選ぶ ──
+function candidatesOf(site, exceptName) {   // 同じ現場の過去グループ（新しい順）
+  return allGroups().filter(g => g.site === site.trim() && g.name !== exceptName && (g.total || 0) > 0);
 }
 function ngName() { return C.groupName(ng.date, ng.site); }
+function ngCurName() { return ng.edited ? ng.name : ngName(); }
+function syncSrc() {   // 現場名などが変わったら引き継ぎ元を選び直す
+  const cands = ng.site.trim() ? candidatesOf(ng.site, ngCurName()) : [];
+  if (!cands.find(c => c.name === ng.src)) { ng.src = cands[0] ? cands[0].name : ''; ng.sel = null; }
+  if (ng.inherit && ng.src && NG_SRC.cache[ng.src] === undefined) loadSrc(ng.src);
+  else { if (ng.src && NG_SRC.cache[ng.src] && !ng.sel) ng.sel = new Set(NG_SRC.cache[ng.src].map(r => r['$id'].value)); renderInherit(); }
+}
+async function loadSrc(name) {
+  ng.src = name; ng.sel = null;
+  if (NG_SRC.cache[name]) { ng.sel = new Set(NG_SRC.cache[name].map(r => r['$id'].value)); renderInherit(); return; }
+  NG_SRC.loading = name; renderInherit();
+  try { NG_SRC.cache[name] = (await callGAS('getGroupRecords', { group: name })).records || []; }
+  catch (e) { delete NG_SRC.cache[name]; toast('引き継ぎ元の機器を読み込めませんでした：' + e.message, 'error'); }
+  if (NG_SRC.loading === name) NG_SRC.loading = '';
+  if (ng.src === name && NG_SRC.cache[name]) ng.sel = new Set(NG_SRC.cache[name].map(r => r['$id'].value));   // 初期は全台選択
+  renderInherit();
+}
+function selectedSrc() {
+  if (!ng.inherit || !ng.src || !ng.sel) return [];
+  return (NG_SRC.cache[ng.src] || []).filter(r => ng.sel.has(r['$id'].value));
+}
+function createLabel() {
+  if (!ng.inherit || !ng.src) return '作成する';
+  const n = selectedSrc().length;
+  return n ? `作成して ${n}台を引き継ぐ` : '作成する（機器の引き継ぎなし）';
+}
+function updInheritCount() {
+  const recs = NG_SRC.cache[ng.src] || [], h = document.getElementById('ng-cnt'), g = document.getElementById('ng-go');
+  if (h) h.textContent = `${ng.sel ? ng.sel.size : 0} / ${recs.length}台を選択`;
+  if (g) g.textContent = createLabel();
+}
+function renderInherit() {
+  const s = document.getElementById('ng-inh-slot'); if (s) s.innerHTML = inheritHTML();
+  updInheritCount();
+}
 function inheritHTML() {
-  const pg = ng.site.trim() && prevGroupOf(ng.site, ng.edited ? ng.name : ngName());
-  if (!pg) return '';
-  return `<label class="inherit"><input type="checkbox" id="ng-inh" ${ng.inherit ? 'checked' : ''}>
-    <span>前回（${slash(pg.date)}点検）の機器 ${pg.total}台を引き継ぐ<small>系統・型式・製造番号・冷媒種・対象外・室内機の型式/製番・報告書の住所/電話番号をコピー。測定値は空で始まります</small></span></label>`;
+  const cands = ng.site.trim() ? candidatesOf(ng.site, ngCurName()) : [];
+  if (!cands.length) return '';
+  let body = '';
+  if (ng.inherit) {
+    const recs = NG_SRC.cache[ng.src];
+    const val = (r, c) => (r[c] && r[c].value) || '';
+    const list = NG_SRC.loading === ng.src ? '<div class="msg" style="padding:14px">機器を読み込み中...</div>'
+      : !recs ? '' : recs.map(r => {
+        const id = r['$id'].value, iu = C.fromRecord(r).indoor.length;
+        return `<label class="mchk"><input type="checkbox" class="ng-m" data-id="${esc(id)}" ${ng.sel && ng.sel.has(id) ? 'checked' : ''}>
+          <span><b>${esc(val(r, '系統') || '（系統未入力）')}</b><small>${esc([val(r, '型式'), val(r, '製造番号')].filter(Boolean).join(' / '))}${iu ? ` ・ 室内機 ${iu}台` : ''}</small></span></label>`;
+      }).join('');
+    body = `<label class="srcsel">引き継ぎ元<select class="ic-fi" id="ng-src">${cands.map(c => `<option value="${esc(c.name)}"${c.name === ng.src ? ' selected' : ''}>${slash(c.date)}点検 ・ ${c.total}台${c.type ? ' ・ ' + esc(c.type) : ''}</option>`).join('')}</select></label>
+      ${recs && recs.length ? `<div class="mhead"><span id="ng-cnt"></span><button type="button" data-act="ng-all">すべて選択</button><button type="button" data-act="ng-none">すべて外す</button></div>` : ''}
+      <div class="mlist">${list}</div>`;
+  }
+  return `<div class="inhbox"><label class="inherit"><input type="checkbox" id="ng-inh" ${ng.inherit ? 'checked' : ''}>
+    <span>過去の点検から機器を引き継ぐ<small>選んだ機器の 系統・型式・製造番号・冷媒種・対象外・室内機の型式/製番・報告書の住所/電話番号をコピー。測定値は空で始まります</small></span></label>${body}</div>`;
 }
 function renderSheet() {
   if (!S.sheet) { $layer.innerHTML = ''; return; }
@@ -380,7 +442,8 @@ function renderSheet() {
       <label>点検種類<select class="ic-fi" id="ng-type">${C.INSPECT_TYPES.map(t => `<option${ng.type === t ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
       <div class="preview"><span>グループ名（自動・編集可）</span><input id="ng-name" value="${esc(ng.edited ? ng.name : ngName())}" placeholder="現場名を入れると自動で作られます"></div>
       <div id="ng-inh-slot">${inheritHTML()}</div>
-      <button class="ic-btn pri" data-act="ng-create">作成する</button></div>`;
+      <button class="ic-btn pri" id="ng-go" data-act="ng-create">${createLabel()}</button></div>`;
+    updInheritCount();
   }
   if (S.sheet === 'addr') {
     const st = addrStat();
@@ -540,11 +603,14 @@ async function createGroup() {
   } catch (e) { overlay(''); toast('❌ 確認できませんでした：' + e.message, 'error'); return; }
   overlay('');
 
-  const pg = prevGroupOf(site, name);
-  if (pg && ng.inherit) {
-    overlay(`前回の機器 ${pg.total}台を引き継いでいます...`);
+  // 引き継ぎ候補があるのに機器一覧をまだ表示していない場合は、先に一覧を出して選んでもらう
+  if (ng.inherit && candidatesOf(site, name).length && (!ng.src || NG_SRC.cache[ng.src] === undefined || NG_SRC.loading === ng.src)) {
+    clearTimeout(ngTimer); syncSrc(); toast('引き継ぐ機器を確認してから「作成」を押してください'); return;
+  }
+  const src = selectedSrc();
+  if (src.length) {
+    overlay(`機器 ${src.length}台を引き継いでいます...`);
     try {
-      const src = (await callGAS('getGroupRecords', { group: pg.name })).records || [];
       const recs = src.map(rec => {
         const o = C.fromRecord(rec), n = C.emptyModel();
         ['系統','型式','製造番号','冷媒種'].forEach(c => { n.v[c] = o.v[c]; });
@@ -632,7 +698,7 @@ async function onAct(e) {
       break;
     }
     case 'save':    if (await saveCurrent(false)) { render(); updSaveBtn(); } break;
-    case 'new-g':   Object.assign(ng, { date: today(), site: '', type: C.INSPECT_TYPES[0], name: '', edited: false, inherit: true }); S.sheet = 'new-g'; renderSheet(); break;
+    case 'new-g':   Object.assign(ng, { date: today(), site: '', type: C.INSPECT_TYPES[0], name: '', edited: false, inherit: true, src: '', sel: null }); NG_SRC.cache = {}; S.sheet = 'new-g'; renderSheet(); break;
     case 'add-m':   S.sheet = 'add-m'; renderSheet(); break;
     case 'addr':    { const v0 = addrStat().values[0] || { addr: '', tel: '' }; Object.assign(AD, { addr: v0.addr, tel: v0.tel, step: 'edit' }); S.sheet = 'addr'; renderSheet(); break; }
     case 'addr-pick': { const x = addrStat().values[+b.dataset.i]; AD.addr = x.addr; AD.tel = x.tel; renderSheet(); break; }
@@ -642,6 +708,8 @@ async function onAct(e) {
     case 'cf':        if (conflictResolve) conflictResolve(b.dataset.v); break;
     case 'close':   if (S.sheet === 'conflict') break; S.sheet = null; renderSheet(); break;
     case 'ng-create': createGroup(); break;
+    case 'ng-all':  if (NG_SRC.cache[ng.src]) { ng.sel = new Set(NG_SRC.cache[ng.src].map(r => r['$id'].value)); renderInherit(); } break;
+    case 'ng-none': ng.sel = new Set(); renderInherit(); break;
     case 'am-create': addMachine(); break;
   }
 }
@@ -655,6 +723,7 @@ $app.addEventListener('input', e => {
   tmp.innerHTML = groupsHTML();
   list.innerHTML = tmp.querySelector('.list').innerHTML;
 });
+let ngTimer;
 $layer.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'ad-addr') { AD.addr = t.value; return; }
@@ -663,9 +732,11 @@ $layer.addEventListener('input', e => {
   if (t.id === 'ng-site') ng.site = t.value;
   if (t.id === 'ng-type') ng.type = t.value;
   if (t.id === 'ng-name') { ng.name = t.value; ng.edited = !!t.value.trim(); }
-  if (t.id === 'ng-inh')  { ng.inherit = t.checked; return; }
+  if (t.id === 'ng-inh')  { ng.inherit = t.checked; syncSrc(); return; }
+  if (t.id === 'ng-src')  { loadSrc(t.value); return; }
+  if (t.classList.contains('ng-m')) { if (!ng.sel) ng.sel = new Set(); t.checked ? ng.sel.add(t.dataset.id) : ng.sel.delete(t.dataset.id); updInheritCount(); return; }
   if ((t.id === 'ng-date' || t.id === 'ng-site') && !ng.edited) { const n = document.getElementById('ng-name'); if (n) n.value = ngName(); }
-  if (t.id === 'ng-site' || t.id === 'ng-date' || t.id === 'ng-name') { const s = document.getElementById('ng-inh-slot'); if (s) s.innerHTML = inheritHTML(); }
+  if (t.id === 'ng-site' || t.id === 'ng-date' || t.id === 'ng-name') { clearTimeout(ngTimer); ngTimer = setTimeout(syncSrc, 300); }
 });
 window.addEventListener('beforeunload', e => { const m = cur(); if (S.screen === 'input' && m && m.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
