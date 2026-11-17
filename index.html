@@ -344,11 +344,28 @@ async function createGroup() {
         ['系統','型式','製造番号','冷媒種'].forEach(c => { n.v[c] = o.v[c]; });
         n.na = new Set(o.na);
         n.indoor = o.indoor.map(r => Object.assign(C.blankRow(), { 型式: r.型式, 製造番号: r.製造番号 }));
-        return Object.assign(C.toRecord(n), groupFields(g));
+        const out = Object.assign(C.toRecord(n), groupFields(g));
+        // 訪問先ルックアップと報告書の住所区分も引き継ぐ（保存時に kintone がアプリ31から住所・電話番号を取り込む）
+        if (rec['ルックアップ'] && rec['ルックアップ'].value) out['ルックアップ'] = { value: rec['ルックアップ'].value };
+        if (rec['報告書へ記載する住所及び連絡先'] && rec['報告書へ記載する住所及び連絡先'].value)
+          out['報告書へ記載する住所及び連絡先'] = { value: rec['報告書へ記載する住所及び連絡先'].value };
+        return out;
       });
-      for (let i = 0; i < recs.length; i += 100) await callGAS('saveRecords', { records: recs.slice(i, i + 100) }, true);
+      let lookupFailed = false;
+      for (let i = 0; i < recs.length; i += 100) {
+        const chunk = recs.slice(i, i + 100);
+        try { await callGAS('saveRecords', { records: chunk }, true); }
+        catch (err) {
+          // 参照先（アプリ31）の訪問先が削除されている等でルックアップが失敗した場合は、ルックアップ無しで作り直す
+          if (!chunk.some(r => r['ルックアップ'])) throw err;
+          lookupFailed = true;
+          chunk.forEach(r => { delete r['ルックアップ']; });
+          await callGAS('saveRecords', { records: chunk }, true);
+        }
+      }
       overlay(''); S.sheet = null;
-      toast(`✅ 作成しました（機器 ${recs.length}台）`, 'success');
+      toast(lookupFailed ? `作成しました（機器 ${recs.length}台）。訪問先の引き継ぎに失敗したため、kintone で訪問先を選び直してください`
+                         : `✅ 作成しました（機器 ${recs.length}台）`, lookupFailed ? 'error' : 'success');
       S.localGroups.push(g); openGroup(g);
     } catch (e) { overlay(''); toast('❌ 作成できませんでした：' + e.message, 'error'); }
     return;
