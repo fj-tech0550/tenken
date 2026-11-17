@@ -205,21 +205,29 @@
 
   // ───────── 自動診断（shindan5.js と同じ判定） ─────────
   C.rules = null;   // null = 読込中, [] = 取得できず
+  // kintone の計算フィールド（過熱度・過冷却度）を入力値から求める（診断ルールで使うため）
+  C.derivedValues = function (m) {
+    const f = c => parseFloat(m.v[c]), o = Object.assign({}, m.v);
+    const r1 = x => String(Math.round(x * 10) / 10);
+    if (!filled(o.過熱度) && !isNaN(f('吸入管温度')) && !isNaN(f('低圧飽和温度'))) o.過熱度 = r1(f('吸入管温度') - f('低圧飽和温度'));
+    if (!filled(o.過冷却度) && !isNaN(f('高圧飽和温度')) && !isNaN(f('膨張弁入口温度'))) o.過冷却度 = r1(f('高圧飽和温度') - f('膨張弁入口温度'));
+    return o;
+  };
   C.diagnose = function (m, rules) {
     rules = rules === undefined ? C.rules : rules;
     if (rules == null) return { cls: 'loading', text: '診断ルール読込中...', msg: '' };
     if (!rules.length) return { cls: 'pending', text: '診断ルール未取得', msg: '' };
     const measured = C.NUM_FIELDS.some(c => !C.CALC_FIELDS.includes(c) && filled(m.v[c]));
     if (!measured) return { cls: 'pending', text: '値を入力すると自動診断します', msg: '' };
-    const msgs = [];
+    const msgs = [], dv = C.derivedValues(m);
     rules.forEach(({ field1, operator, field2, condition, threshold, message }) => {
-      const v1 = parseFloat(m.v[field1]), v2 = field2 ? parseFloat(m.v[field2]) : 0;
+      const v1 = parseFloat(dv[field1]), v2 = field2 ? parseFloat(dv[field2]) : 0;
       let met;
       if (operator === '-' && field2) { const d = v1 - v2; met = condition === '<' ? d < threshold : condition === '>' ? d > threshold : d === threshold; }
       else { met = condition === '<' ? v1 < threshold : condition === '>' ? v1 > threshold : v1 === threshold; }
       if (met && !isNaN(v1)) {
         let t = String(message || '');
-        const vals = Object.assign({}, m.v, { x: v1, y: v2 });
+        const vals = Object.assign({}, dv, { x: v1, y: v2 });
         Object.keys(vals).forEach(k => { t = t.split('{' + k + '}').join(vals[k]); });
         msgs.push(t.replace(/\\n/g, '\n'));
       }
