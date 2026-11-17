@@ -43,11 +43,21 @@
   const IU_KEYS = ['型式','製造番号','吸込','吹出','備考'];
   const IU_TYPE = { 型式:'SINGLE_LINE_TEXT', 製造番号:'SINGLE_LINE_TEXT', 吸込:'NUMBER', 吹出:'NUMBER', 備考:'SINGLE_LINE_TEXT' };
 
+  // 目視点検（ラジオボタン 有/無、初期値 無。有のときだけ備考を表示）[項目コード, 備考コード, 表示名]
+  C.VISUAL = [
+    ['異常運転音・異常振動の有無',     '目視1備考', '異常運転音・異常振動'],
+    ['外観の損傷の有無',               '目視2備考', '外観の損傷'],
+    ['摩耗・腐食及び錆びその他の劣化', '目視3備考', '摩耗・腐食・錆び等の劣化'],
+    ['熱交換器への霜の付着',           '目視4備考', '熱交換器への霜の付着']
+  ];
+  C.visualCount = m => C.VISUAL.filter(x => m.v[x[0]] === '有').length;
+
   C.SECTIONS = [
     { k:'basic',  t:'基本情報',       ic:'📋', c:'blue',   chip:'基本',   rows:['系統','型式','製造番号','冷媒種'] },
     { k:'press',  t:'圧力・飽和温度', ic:'🔴', c:'red',    chip:'圧力',   cells:[['高圧圧力','MPa'],['高圧飽和温度','℃',1],['低圧圧力','MPa'],['低圧飽和温度','℃',1]] },
     { k:'pipe',   t:'管温度',         ic:'🌡', c:'green',  chip:'管温度', cells:[['吐出管温度','℃'],['吸入管温度','℃'],['膨張弁入口温度','℃'],['膨張弁出口温度','℃'],['室外吸込温度','℃'],['室外吹出温度','℃']] },
     { k:'elec',   t:'電気系',         ic:'⚡', c:'purple', chip:'電気',   cells:[['総合電圧','V'],['総合電流','A'],['圧縮機_INV','A'],['圧縮機_STD1','A'],['圧縮機_STD2','A'],['FAN1','A'],['FAN2','A'],['絶縁','MΩ']] },
+    { k:'visual', t:'目視点検',       ic:'👀', c:'orange', chip:'目視' },
     { k:'indoor', t:'室内機',         ic:'❄', c:'teal',   chip:'室内機' },
     { k:'diag',   t:'自動診断・備考', ic:'🔍', c:'gray',   chip:'診断' }
   ];
@@ -93,6 +103,7 @@
     const v = {};
     C.TEXT_FIELDS.concat(C.NUM_FIELDS).forEach(c => { v[c] = ''; });
     v.冷媒種 = ''; v.報告書へ掲載する情報 = '自動診断';
+    C.VISUAL.forEach(x => { v[x[0]] = '無'; v[x[1]] = ''; });
     return { v, indoor: [], na: new Set() };
   };
 
@@ -103,6 +114,10 @@
       if (rec[c] && rec[c].value != null) m.v[c] = String(rec[c].value);
     });
     if (!m.v.報告書へ掲載する情報) m.v.報告書へ掲載する情報 = '自動診断';
+    C.VISUAL.forEach(x => {
+      m.v[x[0]] = (rec[x[0]] && rec[x[0]].value) || '無';
+      m.v[x[1]] = (rec[x[1]] && rec[x[1]].value != null) ? String(rec[x[1]].value) : '';
+    });
     ((rec['対象外項目'] && rec['対象外項目'].value) || []).forEach(o => { if (C.NA_MAP[o]) m.na.add(C.NA_MAP[o]); });
     const rows = (rec[C.IU.table] && rec[C.IU.table].value) || [];
     m.indoor = rows.map(row => {
@@ -120,6 +135,11 @@
     const out = {};
     C.TEXT_FIELDS.concat(C.SELECT_FIELDS).forEach(c => { out[c] = { value: m.v[c] || '' }; });
     C.NUM_FIELDS.forEach(c => { out[c] = { value: m.na.has(c) ? '' : (m.v[c] || '') }; });
+    C.VISUAL.forEach(x => {   // 「無」のときは備考を空にして保存
+      const yes = m.v[x[0]] === '有';
+      out[x[0]] = { value: yes ? '有' : '無' };
+      out[x[1]] = { value: yes ? (m.v[x[1]] || '') : '' };
+    });
     out['対象外項目'] = { value: Object.keys(C.NA_MAP).filter(o => m.na.has(C.NA_MAP[o])) };
     out[C.IU.table] = {
       value: m.indoor.filter(r => !C.isBlankRow(r)).map(r => {
@@ -230,10 +250,23 @@
     return (rows || '<div class="ic-empty">室内機は登録されていません</div>') +
       `<div class="ic-iu-add"><button type="button" data-act="iu-add">＋ 行を追加</button><button type="button" data-act="iu-addcopy" ${m.indoor.length ? '' : 'disabled'}>＋ 前の行の型式で追加</button></div>`;
   }
+  function visualHTML(m, p) {
+    return C.VISUAL.map(([code, rem, label]) => {
+      const yes = m.v[code] === '有';
+      return `<div class="ic-vrow${yes ? ' yes' : ''}"><div class="ic-vl">${esc(label)}</div>
+        <div class="ic-seg2" role="group" aria-label="${esc(label)}">
+          <button type="button" data-rad="${esc(code)}" data-val="無" aria-pressed="${!yes}">無</button>
+          <button type="button" data-rad="${esc(code)}" data-val="有" aria-pressed="${yes}" class="y">有</button></div></div>
+        ${yes ? `<div class="ic-frow ic-vrem"><div class="ic-fl">備考</div><input class="ic-fi" id="${p}-${rem}" data-f="${rem}" value="${esc(m.v[rem])}" placeholder="状況を入力"></div>` : ''}`;
+    }).join('');
+  }
+  const visualCnt = m => { const n = C.visualCount(m); return n ? `有 ${n}件` : '異常なし'; };
+
   C.formHTML = function (m, p) {
     return C.SECTIONS.map(s => {
       let cnt = '';
-      if (s.k !== 'diag') { const x = secCount(m, s); cnt = `<span class="ic-cnt" id="${p}-cnt-${s.k}">${x.d}/${x.t}${s.k === 'indoor' ? '台' : ''}</span>`; }
+      if (s.k === 'visual') cnt = `<span class="ic-cnt" id="${p}-cnt-visual">${visualCnt(m)}</span>`;
+      else if (s.k !== 'diag') { const x = secCount(m, s); cnt = `<span class="ic-cnt" id="${p}-cnt-${s.k}">${x.d}/${x.t}${s.k === 'indoor' ? '台' : ''}</span>`; }
       let inner = '';
       if (s.rows) {
         inner = s.rows.map(c => c === '冷媒種'
@@ -241,6 +274,8 @@
           : `<div class="ic-frow"><div class="ic-fl">${C.LBL[c]}</div><input class="ic-fi" id="${p}-${c}" data-f="${c}" value="${esc(m.v[c])}"></div>`).join('');
       } else if (s.cells) {
         inner = `<div class="ic-pg">${s.cells.map(x => cellHTML(m, p, x[0], x[1], x[2])).join('')}</div>`;
+      } else if (s.k === 'visual') {
+        inner = visualHTML(m, p);
       } else if (s.k === 'indoor') {
         inner = indoorHTML(m, p);
       } else {
@@ -255,6 +290,7 @@
   C.chipsHTML = function (m) {
     return C.SECTIONS.map(s => {
       if (s.k === 'diag') return `<button type="button" class="ic-chip" data-go="${s.k}">${s.chip}</button>`;
+      if (s.k === 'visual') { const n = C.visualCount(m); return `<button type="button" class="ic-chip ${n ? 'warn' : 'full'}" data-go="${s.k}">${s.chip}<span class="n">${n ? '有' + n : 'OK'}</span></button>`; }
       const x = secCount(m, s), cl = x.t && x.d === x.t ? 'full' : x.d ? 'part' : '';
       return `<button type="button" class="ic-chip ${cl}" data-go="${s.k}">${s.chip}<span class="n">${x.d}/${x.t}</span></button>`;
     }).join('');
@@ -275,7 +311,8 @@
     const pl = root.querySelector('.ic-pillslot'); if (pl) pl.innerHTML = C.pillHTML(m);
     C.SECTIONS.forEach(s => {
       const el = root.querySelector(`#${CSS.escape(p + '-cnt-' + s.k)}`);
-      if (el) { const x = secCount(m, s); el.textContent = `${x.d}/${x.t}${s.k === 'indoor' ? '台' : ''}`; }
+      if (el && s.k === 'visual') el.textContent = visualCnt(m);
+      else if (el) { const x = secCount(m, s); el.textContent = `${x.d}/${x.t}${s.k === 'indoor' ? '台' : ''}`; }
     });
     const dg = root.querySelector(`#${CSS.escape(p + '-diag')}`);
     if (dg) { const d = C.diagnose(m); dg.className = 'ic-diag ' + d.cls; dg.textContent = d.text; }
@@ -315,6 +352,20 @@
       if (b.dataset.go) {
         const sc = root.querySelector('.ic-scroll'), sec = q(`${p}-sec-${b.dataset.go}`);
         if (sc && sec) sc.scrollTo({ top: sec.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - 10, behavior: 'smooth' });
+        return;
+      }
+      if (b.dataset.rad) {
+        const code = b.dataset.rad, before = m.v[code];
+        m.v[code] = b.dataset.val;
+        if (before === m.v[code]) return;
+        const sc = root.querySelector('.ic-scroll'), top = sc ? sc.scrollTop : 0;
+        C.rerender(root, m, p);
+        if (sc) sc.scrollTop = top;
+        if (onChange) onChange(m);
+        if (m.v[code] === '有') {
+          const x = C.VISUAL.find(v => v[0] === code), el = x && q(`${p}-${x[1]}`);
+          if (el) el.focus({ preventScroll: true });
+        }
         return;
       }
       if (b.dataset.na) {
@@ -364,6 +415,18 @@
 .ic-sh{padding:12px 14px;font-size:18px;font-weight:700;display:flex;align-items:center;gap:7px}
 .ic-cnt{margin-left:auto;font-size:14px;font-weight:700;opacity:.85;font-variant-numeric:tabular-nums}
 .ic-sh.blue{background:#e8f0fe;color:#1a56db}.ic-sh.red{background:#fce8e6;color:#c5221f}.ic-sh.green{background:#e6f4ea;color:#137333}
+.ic-sh.orange{background:#fff3e0;color:#b45309}
+.ic-chip.warn{border-color:#d97706;color:#b45309} .ic-chip.warn .n{color:#b45309}
+.ic-vrow{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--ic-border)}
+.ic-sh+.ic-vrow{border-top:0}
+.ic-vl{flex:1;min-width:0;font-size:17px}
+.ic-vrow.yes .ic-vl{color:#b45309;font-weight:700}
+.ic-seg2{display:flex;border:1.5px solid var(--ic-border);border-radius:10px;overflow:hidden;flex-shrink:0}
+.ic-seg2 button{border:0;background:var(--ic-card);color:var(--ic-sub);width:64px;height:46px;font-size:18px;font-weight:700}
+.ic-seg2 button+button{border-left:1.5px solid var(--ic-border)}
+.ic-seg2 button[aria-pressed="true"]{background:#e8f0fe;color:#1a56db}
+.ic-seg2 button.y[aria-pressed="true"]{background:#fef3d6;color:#b45309}
+.ic-frow.ic-vrem{border-top:0;padding-top:0;background:#fffaf0}
 .ic-sh.purple{background:#f3e8fd;color:#6a1b9a}.ic-sh.teal{background:#e0f7fa;color:#006064}.ic-sh.gray{background:#f1f3f4;color:#5f6368}
 .ic-frow{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--ic-border)}
 .ic-frow:first-of-type{border-top:0}
