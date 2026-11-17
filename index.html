@@ -98,6 +98,7 @@
     .spin{width:52px;height:52px;border:5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .75s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
     .toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);padding:12px 22px;border-radius:30px;font-size:16px;font-weight:700;z-index:60;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:92vw;text-align:center;color:#fff;background:#202124}
+    .toast{pointer-events:none}
     .toast.success{background:#34a853}.toast.error{background:#ea4335}
     [hidden]{display:none !important}
   </style>
@@ -141,6 +142,7 @@ async function callGAS(action, data = {}, write = false) {
 async function parseRes(res) {
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const j = JSON.parse(await res.text());
+  if (j.conflict) return j;   // 同時編集：呼び出し側でマージ
   if (j.success === false) throw new Error(j.error || '処理に失敗しました');
   return j;
 }
@@ -167,6 +169,8 @@ function toMachine(rec) {
   m.id = rec['$id'].value;
   if (m.v.冷媒種) C.updateSat(m);
   m.dirty = false;
+  m.rev = rec['$revision'] ? rec['$revision'].value : null;
+  m.base = snap(m);   // 開いた時点の内容（変更点の判定・同時編集のマージに使う）
   // 報告書に載せる住所・電話番号（入力画面では扱わず、グループ画面から一括で入れる）
   m.addr = (rec['報告書へ記載する住所'] && rec['報告書へ記載する住所'].value) || '';
   m.tel  = (rec['報告書へ記載する電話番号'] && rec['報告書へ記載する電話番号'].value) || '';
@@ -189,14 +193,85 @@ function addrRecord(addr, tel) {
 function groupFields(g) {
   return { 点検グループ: { value: g.name }, 日付: { value: g.date }, 現場名: { value: g.site }, 点検種類: { value: g.type } };
 }
-function buildPayload(m) {
-  const r = Object.assign(C.toRecord(m), groupFields(S.group));
-  if (Array.isArray(C.rules) && C.rules.length) {   // ルール取得済みのときだけ診断結果を書き込む
+// =====================================================
+// 同時編集対策
+//   ② 保存するのは「開いた時点から自分が変えた項目」だけ
+//   ③ 他の人が先に保存していたら（リビジョン不一致）、項目ごと・室内機の行ごとに自動でまとめる。
+//      同じ項目を2人が違う値に変えていたときだけ、どちらを残すか聞く
+// =====================================================
+const J = x => JSON.stringify(x);
+const IUT = C.IU.table;
+const DERIVED = new Set(['入力進捗', '高圧飽和温度', '低圧飽和温度']);   // 他の値から計算する項目（比較しない）
+function snap(m) { return JSON.parse(J(C.toRecord(m))); }
+
+function buildPayload(m, base) {
+  const cur = snap(m), r = {};
+  Object.keys(cur).forEach(k => { if (!DERIVED.has(k) && J(cur[k]) !== J(base[k])) r[k] = cur[k]; });
+  if (!Object.keys(r).length) return null;                 // 実際の変更なし
+  DERIVED.forEach(k => { r[k] = cur[k]; });
+  if (Array.isArray(C.rules) && C.rules.length) {           // ルール取得済みのときだけ診断結果を書き込む
     const d = C.diagnose(m), msg = d.cls === 'alert' ? d.msg : '';
     r['自動診断2'] = { value: msg };
     r['報告書用フィールド'] = { value: C.reportText(m, msg) };
   }
   return r;
+}
+
+const IU_LBL = { 室内機型式: '型式', 室内機製造番号: '製造番号', 吸込温度: '吸込温度', 吹出温度: '吹出温度', 室内機備考: '備考' };
+function fieldLabel(k) {
+  const vis = C.VISUAL.find(x => x[0] === k || x[1] === k);
+  if (vis) return vis[0] === k ? vis[2] : vis[2] + 'の備考';
+  return C.LBL[k] || { 対象外項目: '対象外の設定', 報告書へ掲載する情報: '報告書掲載', 備考: '備考' }[k] || k;
+}
+const showVal = v => Array.isArray(v) ? (v.join('・') || '（なし）') : (v === '' || v == null ? '（空欄）' : String(v));
+const rowName = r => [r.value.室内機型式 && r.value.室内機型式.value, r.value.室内機製造番号 && r.value.室内機製造番号.value].filter(Boolean).join(' ') || '行';
+
+// base=開いた時点, mine=自分の入力, theirs=他の人が保存した最新 → policy別の結果と衝突一覧
+function mergeRecords(base, mine, theirs) {
+  const outM = JSON.parse(J(theirs)), outT = JSON.parse(J(theirs)), conflicts = [];
+  Object.keys(mine).forEach(k => {
+    if (DERIVED.has(k) || k === IUT) return;
+    if (J(mine[k]) === J(base[k])) return;                                   // 自分は変えていない
+    if (J(theirs[k]) === J(base[k]) || J(mine[k]) === J(theirs[k])) { outM[k] = outT[k] = mine[k]; return; }
+    outM[k] = mine[k];
+    conflicts.push({ label: fieldLabel(k), mine: showVal(mine[k].value), theirs: showVal(theirs[k].value) });
+  });
+  // 室内機：行IDで突き合わせる
+  const map = rec => { const o = {}; (rec[IUT].value || []).forEach(r => { if (r.id) o[r.id] = r; }); return o; };
+  const bR = map(base), mR = map(mine), tR = map(theirs), rowsM = [], rowsT = [];
+  theirs[IUT].value.forEach(tr => {
+    const b = bR[tr.id], mm = mR[tr.id];
+    if (!b) { rowsM.push(tr); rowsT.push(tr); return; }                     // 相手が追加した行
+    if (!mm) {                                                               // 自分が削除した行
+      if (J(tr.value) === J(b.value)) return;
+      conflicts.push({ label: `室内機（${rowName(tr)}）`, mine: '削除', theirs: '内容を変更' });
+      rowsT.push(tr); return;
+    }
+    const rm = JSON.parse(J(tr)), rt = JSON.parse(J(tr));
+    Object.keys(mm.value).forEach(c => {
+      if (J(mm.value[c]) === J(b.value[c])) return;
+      if (J(tr.value[c]) === J(b.value[c]) || J(mm.value[c]) === J(tr.value[c])) { rm.value[c] = rt.value[c] = mm.value[c]; return; }
+      rm.value[c] = mm.value[c];
+      conflicts.push({ label: `室内機（${rowName(tr)}）${IU_LBL[c] || c}`, mine: showVal(mm.value[c].value), theirs: showVal(tr.value[c].value) });
+    });
+    rowsM.push(rm); rowsT.push(rt);
+  });
+  Object.keys(bR).forEach(id => {                                            // 相手が削除した行
+    if (tR[id] || !mR[id] || J(mR[id].value) === J(bR[id].value)) return;
+    conflicts.push({ label: `室内機（${rowName(mR[id])}）`, mine: '内容を変更', theirs: '削除' });
+    rowsM.push({ value: mR[id].value });                                     // 残す場合は新しい行として追加
+  });
+  mine[IUT].value.filter(r => !r.id).forEach(r => { rowsM.push(r); rowsT.push(r); });   // 自分が追加した行
+  outM[IUT] = { value: rowsM }; outT[IUT] = { value: rowsT };
+  return { mine: outM, theirs: outT, conflicts };
+}
+
+// 衝突確認シート（resolve: 'mine' | 'theirs' | 'cancel'）
+let conflictResolve = null, conflictList = [];
+function askConflict(list) {
+  conflictList = list; S.sheet = 'conflict'; renderSheet();
+  const t = document.getElementById('toast'); if (t) t.hidden = true;
+  return new Promise(res => { conflictResolve = v => { conflictResolve = null; S.sheet = null; renderSheet(); res(v); }; });
 }
 
 // =====================================================
@@ -338,6 +413,17 @@ function renderSheet() {
     }
     $layer.innerHTML = `<div class="sheet-bd" data-act="close"></div><div class="sheet" role="dialog" aria-label="報告書の住所・連絡先"><div class="grab"></div>${html}</div>`;
   }
+  if (S.sheet === 'conflict') {
+    $layer.innerHTML = `<div class="sheet-bd" data-act="cf" data-v="cancel"></div><div class="sheet" role="dialog" aria-label="同時編集の確認"><div class="grab"></div>
+      <h3>他の人が先に保存しました</h3>
+      <div class="note warn"><div>この機器を、他の人があなたより先に保存しています。<b>${conflictList.length}項目</b>で、あなたと違う値が入っています。</div>
+        ${conflictList.map(c => `<div class="pick" style="background:transparent"><b>${esc(c.label)}</b><small>あなた：${esc(c.mine)}　／　相手：${esc(c.theirs)}</small></div>`).join('')}</div>
+      <div class="note">それ以外の項目は、あなたの入力と相手の入力をまとめて保存します。</div>
+      <div class="btns"><button class="ic-btn pri" data-act="cf" data-v="mine">あなたの入力で上書き</button>
+        <button class="ic-btn sub" data-act="cf" data-v="theirs">相手の入力を残す</button>
+        <button class="ic-btn" data-act="cf" data-v="cancel">キャンセル（まだ保存しない）</button></div></div>`;
+    return;
+  }
   if (S.sheet === 'add-m') {
     $layer.innerHTML = `<div class="sheet-bd" data-act="close"></div><div class="sheet" role="dialog" aria-label="機器を追加"><div class="grab"></div><h3>機器を追加</h3>
       <label>系統<input class="ic-fi" id="am-系統" placeholder="例：T-7ミキサー"></label>
@@ -385,14 +471,58 @@ async function saveCurrent(silent) {
   if (saving) return false;
   saving = true; overlay('kintone に保存中...');
   try {
-    const res = await callGAS('updateRecord', { id: m.id, record: buildPayload(m) }, true);
-    S.machines[S.mi] = toMachine(res.record);
-    if (!silent) toast('✅ 保存しました', 'success');
-    return true;
+    let model = m, base = m.base, rev = m.rev, merged = false, latestRec = null;
+    for (let tries = 0; tries < 4; tries++) {
+      const payload = buildPayload(model, base);
+      if (!payload) {                                   // 送る変更が無い（相手の入力を残した場合など）
+        S.machines[S.mi] = latestRec ? toMachine(latestRec) : Object.assign(m, { dirty: false });
+        if (!silent && merged) toast('相手の入力を残しました');
+        return true;
+      }
+      const res = await callGAS('updateRecord', { id: m.id, record: payload, revision: rev }, true);
+      if (!res.conflict) {
+        S.machines[S.mi] = toMachine(res.record);
+        if (merged) toast('✅ 他の人の入力とまとめて保存しました', 'success');
+        else if (!silent) toast('✅ 保存しました', 'success');
+        return true;
+      }
+      // 他の人が先に保存していた → 最新とマージ
+      latestRec = res.record;
+      const latest = toMachine(res.record);
+      const mg = mergeRecords(base, snap(model), latest.base);
+      let policy = 'mine';
+      if (mg.conflicts.length) {
+        overlay('');
+        policy = await askConflict(mg.conflicts);
+        if (policy === 'cancel') { toast('保存していません。内容を確認して、もう一度保存してください'); return false; }
+        overlay('kintone に保存中...');
+      }
+      const nm = C.fromRecord(policy === 'mine' ? mg.mine : mg.theirs);
+      if (nm.v.冷媒種) C.updateSat(nm);
+      model = nm; base = latest.base; rev = latest.rev; merged = (J(latest.base) !== J(m.base)) || merged;
+      // 画面の内容もマージ結果に合わせる
+      Object.assign(m, { v: nm.v, indoor: nm.indoor, na: nm.na });
+    }
+    throw new Error('同時に保存が続いたため保存できませんでした。もう一度保存してください');
   } catch (e) {
     toast('❌ 保存できませんでした：' + e.message, 'error');
     return false;
   } finally { saving = false; overlay(''); }
+}
+async function openMachine(i) {
+  overlay('最新の内容を読み込み中...');
+  try { S.machines[i] = toMachine((await callGAS('getRecord', { id: S.machines[i].id })).record); }
+  catch (e) { toast('最新の内容を読み込めませんでした（前回の内容を表示しています）', 'error'); }
+  finally { overlay(''); }
+  S.mi = i; S.screen = 'input'; render(); updSaveBtn();
+  const sc = $app.querySelector('.ic-scroll'); if (sc) sc.scrollTop = 0;
+}
+async function refreshMachines() {   // 他の人の進捗を反映（表示は先に出して、裏で読み直す）
+  const g = S.group;
+  try {
+    const recs = (await callGAS('getGroupRecords', { group: g.name })).records || [];
+    if (S.group === g && S.screen === 'group') { S.machines = recs.map(toMachine); render(); }
+  } catch (e) { /* 表示中の内容のままにする */ }
 }
 async function createGroup() {
   const site = ng.site.trim(), name = (ng.edited ? ng.name : ngName()).trim();
@@ -402,6 +532,13 @@ async function createGroup() {
   const g = { name, date: ng.date, site, type: ng.type, total: 0, done: 0, pDone: 0, pTotal: 0 };
   const exist = allGroups().find(x => x.name === name);
   if (exist) { S.sheet = null; toast('同じ名前のグループを開きました'); openGroup(exist); return; }
+  // 他の人が直前に同じグループを作っていないか kintone で確認（二重作成の防止）
+  overlay('確認中...');
+  try {
+    const already = (await callGAS('getGroupRecords', { group: name })).records || [];
+    if (already.length) { overlay(''); S.sheet = null; toast('他の人が同じグループを作成済みでした。そのグループを開きます'); S.localGroups.push(g); openGroup(g); return; }
+  } catch (e) { overlay(''); toast('❌ 確認できませんでした：' + e.message, 'error'); return; }
+  overlay('');
 
   const pg = prevGroupOf(site, name);
   if (pg && ng.inherit) {
@@ -482,15 +619,15 @@ async function onAct(e) {
     case 'reload':  loadGroups(); break;
     case 'reload-g': openGroup(S.group); break;
     case 'open-g':  { const g = allGroups().find(x => x.name === b.dataset.g); if (g) openGroup(g); break; }
-    case 'open-m':  S.mi = +b.dataset.i; S.screen = 'input'; render(); updSaveBtn(); $app.querySelector('.ic-scroll').scrollTop = 0; break;
+    case 'open-m':  openMachine(+b.dataset.i); break;
     case 'flt':     S.filter = b.dataset.v; render(); break;
     case 'back':
-      if (S.screen === 'input') { if (!(await saveCurrent(true))) return; S.screen = 'group'; render(); }
+      if (S.screen === 'input') { if (!(await saveCurrent(true))) return; S.screen = 'group'; render(); refreshMachines(); }
       else { S.screen = 'groups'; render(); loadGroups(); }
       break;
     case 'prev': case 'next': {
       if (!(await saveCurrent(true))) return;
-      S.mi += a === 'next' ? 1 : -1; render(); updSaveBtn();
+      await openMachine(S.mi + (a === 'next' ? 1 : -1));
       toast(`${cur().v.系統 || '次の機器'} を表示中`);
       break;
     }
@@ -502,7 +639,8 @@ async function onAct(e) {
     case 'addr-apply': startApply(); break;
     case 'addr-back': AD.step = 'edit'; renderSheet(); break;
     case 'addr-do':   applyAddr(b.dataset.mode); break;
-    case 'close':   S.sheet = null; renderSheet(); break;
+    case 'cf':        if (conflictResolve) conflictResolve(b.dataset.v); break;
+    case 'close':   if (S.sheet === 'conflict') break; S.sheet = null; renderSheet(); break;
     case 'ng-create': createGroup(); break;
     case 'am-create': addMachine(); break;
   }
