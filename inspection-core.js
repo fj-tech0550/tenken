@@ -18,7 +18,7 @@
     吐出管温度:'吐出管温度', 吸入管温度:'吸入管温度', 膨張弁入口温度:'膨張弁入口温度', 膨張弁出口温度:'膨張弁出口温度',
     室外吸込温度:'室外吸込温度', 室外吹出温度:'室外吹出温度',
     総合電圧:'総合電圧', 総合電流:'総合電流', 圧縮機_INV:'圧縮機 INV', 圧縮機_STD1:'圧縮機 STD1', 圧縮機_STD2:'圧縮機 STD2',
-    FAN1:'FAN1', FAN2:'FAN2', 絶縁:'絶縁抵抗'
+    FAN1:'FAN1', FAN2:'FAN2', 絶縁:'絶縁抵抗', 冷温水入口温度:'冷温水入口温度', 冷温水出口温度:'冷温水出口温度'
   };
   // 入力進捗の母数（19項目）
   C.PF = ['型式','製造番号','冷媒種','高圧圧力','低圧圧力','吐出管温度','吸入管温度','膨張弁入口温度','膨張弁出口温度',
@@ -29,7 +29,8 @@
 
   C.TEXT_FIELDS   = ['系統','型式','製造番号','備考'];
   C.NUM_FIELDS    = ['高圧圧力','低圧圧力','高圧飽和温度','低圧飽和温度','吐出管温度','吸入管温度','膨張弁入口温度','膨張弁出口温度',
-                     '室外吸込温度','室外吹出温度','総合電圧','総合電流','圧縮機_INV','圧縮機_STD1','圧縮機_STD2','FAN1','FAN2','絶縁'];
+                     '室外吸込温度','室外吹出温度','総合電圧','総合電流','圧縮機_INV','圧縮機_STD1','圧縮機_STD2','FAN1','FAN2','絶縁',
+                     '冷温水入口温度','冷温水出口温度'];   // 冷温水はチラー等のみ使うため入力進捗（19項目）には含めない
   C.SELECT_FIELDS = ['冷媒種','報告書へ掲載する情報'];
   C.CALC_FIELDS   = ['高圧飽和温度','低圧飽和温度'];
 
@@ -52,13 +53,21 @@
   ];
   C.visualCount = m => C.VISUAL.filter(x => m.v[x[0]] === '有').length;
 
+  // 写真（添付ファイルフィールド。1フィールド＝1枠）
+  C.PHOTO_FIELDS = ['添付ファイル', '添付ファイル_0', '添付ファイル_1'];
+  C.PHOTO_ENABLED = false;   // WEBアプリで true にする（kintone ポップアップは kintone 標準の添付欄を使う）
+  C.photoHooks = null;       // { upload(file) → Promise<{fileKey,name,contentType,size,_src}>, thumb(fileKey) → Promise<src>, error(msg) }
+  const isImg = f => (!f.contentType && !f.name) || /^image\//.test(f.contentType || '') || /\.(jpe?g|png|gif|webp|heic)$/i.test(f.name || '');
+  C.isImageFile = isImg;
+
   C.SECTIONS = [
     { k:'basic',  t:'基本情報',       ic:'📋', c:'blue',   chip:'基本',   rows:['系統','型式','製造番号','冷媒種'] },
     { k:'press',  t:'圧力・飽和温度', ic:'🔴', c:'red',    chip:'圧力',   cells:[['高圧圧力','MPa'],['高圧飽和温度','℃',1],['低圧圧力','MPa'],['低圧飽和温度','℃',1]] },
-    { k:'pipe',   t:'管温度',         ic:'🌡', c:'green',  chip:'管温度', cells:[['吐出管温度','℃'],['吸入管温度','℃'],['膨張弁入口温度','℃'],['膨張弁出口温度','℃'],['室外吸込温度','℃'],['室外吹出温度','℃']] },
+    { k:'pipe',   t:'管温度',         ic:'🌡', c:'green',  chip:'管温度', cells:[['吐出管温度','℃'],['吸入管温度','℃'],['膨張弁入口温度','℃'],['膨張弁出口温度','℃'],['室外吸込温度','℃'],['室外吹出温度','℃'],['冷温水入口温度','℃'],['冷温水出口温度','℃']] },
     { k:'elec',   t:'電気系',         ic:'⚡', c:'purple', chip:'電気',   cells:[['総合電圧','V'],['総合電流','A'],['圧縮機_INV','A'],['圧縮機_STD1','A'],['圧縮機_STD2','A'],['FAN1','A'],['FAN2','A'],['絶縁','MΩ']] },
     { k:'visual', t:'目視点検',       ic:'👀', c:'orange', chip:'目視' },
     { k:'indoor', t:'室内機',         ic:'❄', c:'teal',   chip:'室内機' },
+    { k:'photo',  t:'写真',           ic:'📷', c:'gray',   chip:'写真' },     // WEBアプリのみ（C.PHOTO_ENABLED = true の時）
     { k:'diag',   t:'自動診断・備考', ic:'🔍', c:'gray',   chip:'診断' }
   ];
   function secFields(s) {
@@ -104,7 +113,8 @@
     C.TEXT_FIELDS.concat(C.NUM_FIELDS).forEach(c => { v[c] = ''; });
     v.冷媒種 = ''; v.報告書へ掲載する情報 = '自動診断';
     C.VISUAL.forEach(x => { v[x[0]] = '無'; v[x[1]] = ''; });
-    return { v, indoor: [], na: new Set() };
+    const files = {}; C.PHOTO_FIELDS.forEach(f => { files[f] = []; });
+    return { v, indoor: [], na: new Set(), files };
   };
 
   // kintone のレコード（REST / kintone.app.record.get().record どちらも可）→ モデル
@@ -125,6 +135,10 @@
       IU_KEYS.forEach(k => { const f = row.value[C.IU[k]]; r[k] = f && f.value != null ? String(f.value) : ''; });
       return r;
     }).filter(r => !C.isBlankRow(r));
+    m.files = {};
+    C.PHOTO_FIELDS.forEach(f => {
+      m.files[f] = ((rec[f] && rec[f].value) || []).map(x => ({ fileKey: x.fileKey, name: x.name, contentType: x.contentType, size: x.size }));
+    });
     return m;
   };
 
@@ -151,6 +165,9 @@
       })
     };
     out['入力進捗'] = { value: C.progressText(m) };
+    if (opt && opt.files && m.files) {
+      C.PHOTO_FIELDS.forEach(f => { out[f] = { value: (m.files[f] || []).filter(x => x.fileKey).map(x => ({ fileKey: x.fileKey })) }; });
+    }
     return out;
   };
 
@@ -172,6 +189,24 @@
     out['現場名']     = { value: g.site };
     if (g.type) out['点検種類'] = { value: g.type };
     return out;
+  };
+
+  // 画像を縮小して JPEG の dataURL にする（長い辺 max px）
+  C.resizeImage = function (blob, max, q) {
+    max = max || 1600; q = q || 0.8;
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob), img = new Image();
+      img.onload = () => {
+        const sc = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * sc)), h = Math.max(1, Math.round(img.naturalHeight * sc));
+        const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+        const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        resolve(cv.toDataURL('image/jpeg', q));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('画像を読み込めませんでした')); };
+      img.src = url;
+    });
   };
 
   // ───────── 入力進捗 ─────────
@@ -288,12 +323,36 @@
         ${yes ? `<div class="ic-frow ic-vrem"><div class="ic-fl">備考</div><input class="ic-fi" id="${p}-${rem}" data-f="${rem}" value="${esc(m.v[rem])}" placeholder="状況を入力"></div>` : ''}`;
     }).join('');
   }
+  const photoCount = m => C.PHOTO_FIELDS.reduce((a, f) => a + ((m.files && m.files[f]) || []).filter(x => x.fileKey || x.uploading).length, 0);
+  function photoHTML(m, p) {
+    return `<div class="ic-ph">${C.PHOTO_FIELDS.map((f, i) => {
+      const list = (m.files && m.files[f]) || [], x = list[0];
+      if (!x) return `<label class="ic-phs add"><input type="file" accept="image/*" data-phup="${f}" hidden><span class="pl">＋</span><span>写真${i + 1}</span></label>`;
+      const img = isImg(x);
+      return `<div class="ic-phs${x.uploading ? ' up' : ''}">
+        ${x.uploading ? `<img src="${x._src || ''}" alt=""><span class="st">アップロード中...</span>`
+          : img ? `<img class="ic-phimg" data-fk="${C.esc(x.fileKey)}" src="${x._src || ''}" alt="写真${i + 1}">` : `<span class="st">${C.esc(x.name || 'ファイル')}</span>`}
+        ${list.length > 1 ? `<span class="more">他${list.length - 1}件</span>` : ''}
+        ${x.uploading ? '' : `<button type="button" class="ic-phdel" data-phdel="${f}" aria-label="写真${i + 1}を削除">✕</button>`}</div>`;
+    }).join('')}</div><div class="ic-phnote">写真は自動で縮小して保存されます。報告書には3枚まで載ります。</div>`;
+  }
+  // 表示されていないサムネイルを読み込む
+  C.fillThumbs = function (root) {
+    if (!C.photoHooks || !C.photoHooks.thumb) return;
+    root.querySelectorAll('img.ic-phimg[data-fk]').forEach(img => {
+      if (img.getAttribute('src') || img.dataset.loading) return;
+      img.dataset.loading = '1';
+      C.photoHooks.thumb(img.dataset.fk).then(src => { img.src = src; }).catch(() => { img.alt = '表示できません'; });
+    });
+  };
   const visualCnt = m => { const n = C.visualCount(m); return n ? `有 ${n}件` : '異常なし'; };
 
+  const secs = () => C.SECTIONS.filter(s => s.k !== 'photo' || C.PHOTO_ENABLED);
   C.formHTML = function (m, p) {
-    return C.SECTIONS.map(s => {
+    return secs().map(s => {
       let cnt = '';
-      if (s.k === 'visual') cnt = `<span class="ic-cnt" id="${p}-cnt-visual">${visualCnt(m)}</span>`;
+      if (s.k === 'photo') cnt = `<span class="ic-cnt" id="${p}-cnt-photo">${photoCount(m)}枚</span>`;
+      else if (s.k === 'visual') cnt = `<span class="ic-cnt" id="${p}-cnt-visual">${visualCnt(m)}</span>`;
       else if (s.k !== 'diag') { const x = secCount(m, s); cnt = `<span class="ic-cnt" id="${p}-cnt-${s.k}">${x.d}/${x.t}${s.k === 'indoor' ? '台' : ''}</span>`; }
       let inner = '';
       if (s.rows) {
@@ -306,6 +365,8 @@
         inner = visualHTML(m, p);
       } else if (s.k === 'indoor') {
         inner = indoorHTML(m, p);
+      } else if (s.k === 'photo') {
+        inner = photoHTML(m, p);
       } else {
         const d = C.diagnose(m);
         inner = `<div class="ic-diag ${d.cls}" id="${p}-diag">${esc(d.text)}</div>
@@ -316,7 +377,8 @@
     }).join('');
   };
   C.chipsHTML = function (m) {
-    return C.SECTIONS.map(s => {
+    return secs().map(s => {
+      if (s.k === 'photo') { const n = photoCount(m); return `<button type="button" class="ic-chip${n ? ' full' : ''}" data-go="${s.k}">${s.chip}<span class="n">${n}枚</span></button>`; }
       if (s.k === 'diag') return `<button type="button" class="ic-chip" data-go="${s.k}">${s.chip}</button>`;
       if (s.k === 'visual') { const n = C.visualCount(m); return `<button type="button" class="ic-chip ${n ? 'warn' : 'full'}" data-go="${s.k}">${s.chip}<span class="n">${n ? '有' + n : 'OK'}</span></button>`; }
       const x = secCount(m, s), cl = x.t && x.d === x.t ? 'full' : x.d ? 'part' : '';
@@ -337,13 +399,15 @@
   C.refresh = function (root, m, p) {
     const ch = root.querySelector('.ic-chips'); if (ch) ch.innerHTML = C.chipsHTML(m);
     const pl = root.querySelector('.ic-pillslot'); if (pl) pl.innerHTML = C.pillHTML(m);
-    C.SECTIONS.forEach(s => {
+    secs().forEach(s => {
       const el = root.querySelector(`#${CSS.escape(p + '-cnt-' + s.k)}`);
-      if (el && s.k === 'visual') el.textContent = visualCnt(m);
+      if (el && s.k === 'photo') el.textContent = photoCount(m) + '枚';
+      else if (el && s.k === 'visual') el.textContent = visualCnt(m);
       else if (el) { const x = secCount(m, s); el.textContent = `${x.d}/${x.t}${s.k === 'indoor' ? '台' : ''}`; }
     });
     const dg = root.querySelector(`#${CSS.escape(p + '-diag')}`);
     if (dg) { const d = C.diagnose(m); dg.className = 'ic-diag ' + d.cls; dg.textContent = d.text; }
+    if (C.PHOTO_ENABLED) C.fillThumbs(root);
   };
   C.rerender = function (root, m, p) {
     const f = root.querySelector('.ic-formslot');
@@ -374,6 +438,21 @@
       C.refresh(root, m, p);
       if (onChange) onChange(m);
     });
+    root.addEventListener('change', e => {
+      const t = e.target, m = getModel();
+      if (!m || !t.dataset || !t.dataset.phup || !t.files || !t.files[0]) return;
+      const f = t.dataset.phup, file = t.files[0];
+      if (!C.photoHooks || !C.photoHooks.upload) return;
+      m.files[f] = [{ uploading: true, name: file.name }];
+      C.rerender(root, m, p);
+      C.resizeImage(file, 400, 0.7).then(src => { if (m.files[f][0] && m.files[f][0].uploading) { m.files[f][0]._src = src; C.rerender(root, m, p); } }).catch(() => {});
+      C.photoHooks.upload(file).then(info => {
+        m.files[f] = [info]; C.rerender(root, m, p); if (onChange) onChange(m);
+      }).catch(err => {
+        m.files[f] = []; C.rerender(root, m, p);
+        if (C.photoHooks.error) C.photoHooks.error('写真をアップロードできませんでした：' + (err.message || err));
+      });
+    });
     root.addEventListener('click', e => {
       const m = getModel(); if (!m) return;
       const b = e.target.closest('button'); if (!b || !root.contains(b)) return;
@@ -395,6 +474,15 @@
           if (el) el.focus({ preventScroll: true });
         }
         return;
+      }
+      if (b.dataset.phdel) {
+        if (!b.classList.contains('danger')) {
+          b.classList.add('danger'); b.textContent = '削除';
+          setTimeout(() => { if (b.isConnected) { b.classList.remove('danger'); b.textContent = '✕'; } }, 2500);
+          return;
+        }
+        m.files[b.dataset.phdel] = [];
+        C.rerender(root, m, p); if (onChange) onChange(m); return;
       }
       if (b.dataset.na) {
         const c = b.dataset.na;
@@ -496,6 +584,17 @@
 .ic-diag.ok{background:var(--ic-ok-bg);color:var(--ic-ok)} .ic-diag.alert{background:var(--ic-bad-bg);color:var(--ic-bad)}
 .ic-diag.pending,.ic-diag.loading{background:var(--ic-gray-bg);color:var(--ic-sub)}
 .ic-ring{width:48px;height:48px;flex-shrink:0}
+.ic-ph{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px}
+.ic-phs{position:relative;aspect-ratio:4/3;border:1.5px solid var(--ic-border);border-radius:10px;overflow:hidden;background:var(--ic-gray-bg);display:flex;align-items:center;justify-content:center}
+.ic-phs img{width:100%;height:100%;object-fit:cover;display:block}
+.ic-phs.add{border-style:dashed;border-color:#5f6368;flex-direction:column;color:var(--ic-sub);font-size:14px;font-weight:700;cursor:pointer;background:var(--ic-card)}
+.ic-phs.add .pl{font-size:30px;line-height:1;color:var(--ic-primary)}
+.ic-phs .st{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);color:#fff;font-size:12px;text-align:center;padding:3px;font-weight:700}
+.ic-phs.up img{opacity:.6}
+.ic-phs .more{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:1px 6px;border-radius:6px}
+.ic-phdel{position:absolute;right:6px;top:6px;border:0;background:rgba(0,0,0,.6);color:#fff;border-radius:14px;min-width:28px;height:28px;font-size:14px;padding:0 8px}
+.ic-phdel.danger{background:#c5221f;font-weight:700}
+.ic-phnote{font-size:13px;color:var(--ic-sub);padding:0 12px 12px}
 /* kintone 用ダイアログ */
 .ic-dlg-wrap{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px}
 .ic-dlg-bd{position:absolute;inset:0;background:rgba(0,0,0,.5)}
