@@ -124,6 +124,46 @@ const C = window.InspCore;
 C.injectCSS();
 
 // =====================================================
+// 写真（添付ファイル／添付ファイル_0／添付ファイル_1）
+//   撮影・選択した写真はスマホ側で長い辺1600pxに縮小してから GAS 経由で kintone にアップロード
+//   アップロードで得た fileKey を、保存時に添付ファイルフィールドへ指定して添付する
+// =====================================================
+C.PHOTO_ENABLED = true;
+const THUMB = {};   // fileKey → 表示用の画像（dataURL）
+function b64ToBlob(b64, type) {
+  const bin = atob(b64), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return new Blob([u], { type: type || 'image/jpeg' });
+}
+C.photoHooks = {
+  async upload(file) {
+    const src = await C.resizeImage(file, 1600, 0.8), b64 = src.split(',')[1];
+    const d = new Date(), pad = n => String(n).padStart(2, '0');
+    const name = `photo_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.jpg`;
+    const res = await callGAS('uploadFile', { name, contentType: 'image/jpeg', data: b64 }, true);
+    THUMB[res.fileKey] = src;
+    return { fileKey: res.fileKey, name, contentType: 'image/jpeg', size: Math.round(b64.length * 0.75), _src: src };
+  },
+  async thumb(fileKey) {
+    if (THUMB[fileKey]) return THUMB[fileKey];
+    const r = await callGAS('getFile', { fileKey });
+    const src = await C.resizeImage(b64ToBlob(r.data, r.contentType), 600, 0.8);
+    THUMB[fileKey] = src;
+    return src;
+  },
+  error(msg) { toast(msg, 'error'); }
+};
+// 保存後は kintone が別の fileKey を返すので、表示用の画像を引き継ぐ
+function carryThumbs(from, to) {
+  C.PHOTO_FIELDS.forEach(f => {
+    const a = (from.files && from.files[f]) || [], b = (to.files && to.files[f]) || [];
+    if (a.length === b.length) a.forEach((x, i) => { const src = x._src || THUMB[x.fileKey]; if (src && b[i].fileKey) THUMB[b[i].fileKey] = src; });
+  });
+  return to;
+}
+const isUploading = m => C.PHOTO_FIELDS.some(f => ((m.files && m.files[f]) || []).some(x => x.uploading));
+
+// =====================================================
 // ★ GAS エンドポイントURL（GASを「新しいデプロイ」した場合はここを差し替え）
 // =====================================================
 const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxY9uV845y4Ul_OJb3uPdNlk2BF7M_x7Fq3eVFYVjts3E_kTihk6wsMI5GJE-gF6dMRig/exec';
@@ -214,7 +254,7 @@ function groupFields(g) {
 const J = x => JSON.stringify(x);
 const IUT = C.IU.table;
 const DERIVED = new Set(['入力進捗', '高圧飽和温度', '低圧飽和温度']);   // 他の値から計算する項目（比較しない）
-function snap(m) { return JSON.parse(J(C.toRecord(m))); }
+function snap(m) { return JSON.parse(J(C.toRecord(m, { files: true }))); }
 
 function buildPayload(m, base) {
   const cur = snap(m), r = {};
@@ -231,11 +271,12 @@ function buildPayload(m, base) {
 
 const IU_LBL = { 室内機型式: '型式', 室内機製造番号: '製造番号', 吸込温度: '吸込温度', 吹出温度: '吹出温度', 室内機備考: '備考' };
 function fieldLabel(k) {
+  if (C.PHOTO_FIELDS.includes(k)) return '写真' + (C.PHOTO_FIELDS.indexOf(k) + 1);
   const vis = C.VISUAL.find(x => x[0] === k || x[1] === k);
   if (vis) return vis[0] === k ? vis[2] : vis[2] + 'の備考';
   return C.LBL[k] || { 対象外項目: '対象外の設定', 報告書へ掲載する情報: '報告書掲載', 備考: '備考' }[k] || k;
 }
-const showVal = v => Array.isArray(v) ? (v.join('・') || '（なし）') : (v === '' || v == null ? '（空欄）' : String(v));
+const showVal = v => Array.isArray(v) ? (v.length && typeof v[0] === 'object' ? (v.length + '枚') : (v.join('・') || '（なし）')) : (v === '' || v == null ? '（空欄）' : String(v));
 const rowName = r => [r.value.室内機型式 && r.value.室内機型式.value, r.value.室内機製造番号 && r.value.室内機製造番号.value].filter(Boolean).join(' ') || '行';
 
 // base=開いた時点, mine=自分の入力, theirs=他の人が保存した最新 → policy別の結果と衝突一覧
@@ -292,7 +333,7 @@ function askConflict(list) {
 function render() {
   if (S.screen === 'groups') $app.innerHTML = groupsHTML();
   if (S.screen === 'group')  $app.innerHTML = groupHTML();
-  if (S.screen === 'input')  $app.innerHTML = inputHTML();
+  if (S.screen === 'input')  { $app.innerHTML = inputHTML(); C.fillThumbs($app); }
   renderSheet();
 }
 
@@ -532,6 +573,7 @@ async function saveCurrent(silent) {
   const m = cur();
   if (!m || !m.dirty) return true;
   if (saving) return false;
+  if (isUploading(m)) { toast('写真をアップロード中です。終わってからもう一度お試しください', 'error'); return false; }
   saving = true; overlay('kintone に保存中...');
   try {
     let model = m, base = m.base, rev = m.rev, merged = false, latestRec = null;
@@ -544,7 +586,7 @@ async function saveCurrent(silent) {
       }
       const res = await callGAS('updateRecord', { id: m.id, record: payload, revision: rev }, true);
       if (!res.conflict) {
-        S.machines[S.mi] = toMachine(res.record);
+        S.machines[S.mi] = carryThumbs(model, toMachine(res.record));
         if (merged) toast('✅ 他の人の入力とまとめて保存しました', 'success');
         else if (!silent) toast('✅ 保存しました', 'success');
         return true;
@@ -564,7 +606,7 @@ async function saveCurrent(silent) {
       if (nm.v.冷媒種) C.updateSat(nm);
       model = nm; base = latest.base; rev = latest.rev; merged = (J(latest.base) !== J(m.base)) || merged;
       // 画面の内容もマージ結果に合わせる
-      Object.assign(m, { v: nm.v, indoor: nm.indoor, na: nm.na });
+      Object.assign(m, { v: nm.v, indoor: nm.indoor, na: nm.na, files: nm.files });
     }
     throw new Error('同時に保存が続いたため保存できませんでした。もう一度保存してください');
   } catch (e) {
