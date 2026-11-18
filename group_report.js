@@ -330,7 +330,7 @@ td.v{font-size:9.4pt}
     const fileName = (records.length === 1 && !opt.cover
       ? `作業報告書-${v(r0, '日付')} ${v(r0, '点検種類')} ${v(r0, '系統')}`
       : `作業報告書-${v(r0, '日付')} ${v(r0, '点検種類')} ${site(r0)}`).replace(/[\\/:*?"<>|]/g, '_').trim();
-    return `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>${esc(fileName)}</title><style>${R.CSS}</style></head><body>
+    return `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>${esc(fileName)}</title><style>${R.CSS}</style></head><body>
       <div class="bar"><b>${esc(records.length === 1 && !opt.cover ? v(r0, '系統') : group)}</b><span>${records.length}台 ・ <span id="bar-n"></span>ページ</span><button onclick="print()">印刷 / PDFに保存</button><span>印刷画面の送信先で「PDFに保存」を選ぶとPDFになります</span></div>
       ${body}
       <script>${LAYOUT_JS}
@@ -342,7 +342,7 @@ td.v{font-size:9.4pt}
   R.prepareWindow = function () {
     const w = window.open('', '_blank');
     if (!w) { alert('ポップアップがブロックされました。ブラウザの設定でポップアップを許可してください。'); return null; }
-    w.document.write('<meta name="viewport" content="width=device-width"><p style="font-family:sans-serif;padding:24px">報告書を作成しています...</p>');
+    w.document.write('<link rel="icon" href="data:,"><meta name="viewport" content="width=device-width"><p style="font-family:sans-serif;padding:24px">報告書を作成しています...</p>');
     return w;
   };
   R.message = function (w, msg, err) { try { w.document.body.innerHTML = `<p style="font-family:sans-serif;padding:24px;${err ? 'color:#c00' : ''}">${esc(msg)}</p>`; } catch (e) { /* 閉じられた */ } };
