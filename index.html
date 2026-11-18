@@ -15,6 +15,8 @@
   <title>空調機点検アプリ</title>
   <!-- 共通モジュール（kintone 側も同じファイルを読み込む） -->
   <script src="inspection-core.js"></script>
+  <!-- 作業報告書（kintone 側と同じファイル。入力画面の「報告書」ボタンで使用） -->
+  <script src="group_report.js"></script>
   <style>
     html,body{height:100%;margin:0}
     body{background:var(--ic-bg,#f0f4f8)}
@@ -26,6 +28,7 @@
     .hd .s{font-size:14px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .hbtn{border:0;background:rgba(255,255,255,.2);color:#fff;min-width:42px;height:42px;border-radius:21px;font-size:24px;line-height:1;flex-shrink:0;padding:0 12px}
     .hbtn.sm{font-size:15px;font-weight:700}
+    .hbtn.rep{font-size:14px;font-weight:700;padding:0 10px;white-space:nowrap}
     /* 一覧 */
     .search{width:100%;height:52px;border:1.5px solid var(--ic-border);border-radius:12px;padding:0 14px;background:var(--ic-card);font-size:18px;color:var(--ic-text);-webkit-appearance:none;appearance:none}
     .lbl{font-size:13px;font-weight:700;letter-spacing:.08em;color:var(--ic-sub);margin:16px 4px 8px}
@@ -398,7 +401,8 @@ function groupHTML() {
 function inputHTML() {
   const m = cur(), n = S.machines.length;
   return `<header class="hd"><button class="hbtn" data-act="back" aria-label="機器一覧へ">‹</button>
-    <div class="g"><div class="s">${esc(S.group.site)} ・ ${S.mi + 1}/${n}台目</div><h1>${esc(m.v.系統 || '（系統未入力）')}</h1></div><span class="ic-pillslot">${C.pillHTML(m)}</span></header>
+    <div class="g"><div class="s">${esc(S.group.site)} ・ ${S.mi + 1}/${n}台目</div><h1>${esc(m.v.系統 || '（系統未入力）')}</h1></div><span class="ic-pillslot">${C.pillHTML(m)}</span>
+    <button class="hbtn rep" data-act="report" aria-label="この機器の報告書を出力">📄 報告書</button></header>
     <nav class="ic-chips" aria-label="セクション">${C.chipsHTML(m)}</nav>
     <main class="ic-scroll"><div class="ic-formslot">${C.formHTML(m, 'w')}</div></main>
     <div class="ic-foot"><button class="ic-btn" data-act="prev" ${S.mi === 0 ? 'disabled' : ''}>‹ 前</button>
@@ -614,6 +618,23 @@ async function saveCurrent(silent) {
     return false;
   } finally { saving = false; overlay(''); }
 }
+// この機器だけの作業報告書（未保存の入力は先に保存してから、kintone の内容で出力）
+async function exportReport() {
+  const R = window.InspReport;
+  if (!R) { toast('group_report.js が読み込まれていません', 'error'); return; }
+  const w = R.prepareWindow(); if (!w) return;   // ポップアップブロック回避のため先に開く
+  if (!(await saveCurrent(true))) { R.message(w, '保存できなかったため、報告書の出力を中止しました。', true); return; }
+  try {
+    const rec = (await callGAS('getRecord', { id: cur().id })).record;
+    const keys = R.photoKeys(rec), images = {};
+    for (let i = 0; i < keys.length; i++) {
+      R.message(w, `写真を読み込んでいます... ${i + 1} / ${keys.length}`);
+      const f = await callGAS('getFile', { fileKey: keys[i] });
+      images[keys[i]] = await C.resizeImage(b64ToBlob(f.data, f.contentType), 1000, 0.82);
+    }
+    R.render(w, [rec], { cover: false, images });
+  } catch (e) { R.message(w, '作成できませんでした：' + e.message, true); }
+}
 async function openMachine(i) {
   overlay('最新の内容を読み込み中...');
   try { S.machines[i] = toMachine((await callGAS('getRecord', { id: S.machines[i].id })).record); }
@@ -732,6 +753,7 @@ async function onAct(e) {
       break;
     }
     case 'save':    if (await saveCurrent(false)) { render(); updSaveBtn(); } break;
+    case 'report':  exportReport(); break;
     case 'new-g':   Object.assign(ng, { date: today(), site: '', type: C.INSPECT_TYPES[0], name: '', edited: false, inherit: true, src: '', sel: null }); NG_SRC.cache = {}; S.sheet = 'new-g'; renderSheet(); break;
     case 'add-m':   S.sheet = 'add-m'; renderSheet(); break;
     case 'addr':    { const v0 = addrStat().values[0] || { addr: '', tel: '' }; Object.assign(AD, { addr: v0.addr, tel: v0.tel, step: 'edit' }); S.sheet = 'addr'; renderSheet(); break; }
