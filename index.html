@@ -657,12 +657,12 @@ async function createGroup() {
   if (!name) { toast('グループ名を入力してください', 'error'); return; }
   const g = { name, date: ng.date, site, type: ng.type, total: 0, done: 0, pDone: 0, pTotal: 0 };
   const exist = allGroups().find(x => x.name === name);
-  if (exist) { S.sheet = null; toast('同じ名前のグループを開きました'); openGroup(exist); return; }
+  if (exist) { S.sheet = null; toast('同じ名前のグループを開きました'); goGroup(exist); return; }
   // 他の人が直前に同じグループを作っていないか kintone で確認（二重作成の防止）
   overlay('確認中...');
   try {
     const already = (await callGAS('getGroupRecords', { group: name })).records || [];
-    if (already.length) { overlay(''); S.sheet = null; toast('他の人が同じグループを作成済みでした。そのグループを開きます'); S.localGroups.push(g); openGroup(g); return; }
+    if (already.length) { overlay(''); S.sheet = null; toast('他の人が同じグループを作成済みでした。そのグループを開きます'); S.localGroups.push(g); goGroup(g); return; }
   } catch (e) { overlay(''); toast('❌ 確認できませんでした：' + e.message, 'error'); return; }
   overlay('');
 
@@ -678,12 +678,12 @@ async function createGroup() {
       for (let i = 0; i < recs.length; i += 100) await callGAS('saveRecords', { records: recs.slice(i, i + 100) }, true);
       overlay(''); S.sheet = null;
       toast(`✅ 作成しました（機器 ${recs.length}台）`, 'success');
-      S.localGroups.push(g); openGroup(g);
+      S.localGroups.push(g); goGroup(g);
     } catch (e) { overlay(''); toast('❌ 作成できませんでした：' + e.message, 'error'); }
     return;
   }
   S.sheet = null; S.localGroups.push(g);
-  S.group = g; S.machines = []; S.mErr = ''; S.screen = 'group'; render();
+  S.group = g; S.machines = []; S.mErr = ''; S.screen = 'group'; pushNav(); render();
   toast('作成しました。「＋ 機器を追加」から登録してください');
 }
 async function addMachine() {
@@ -696,7 +696,7 @@ async function addMachine() {
     const st = addrStat(), a = st.values.length === 1 ? st.values[0] : { addr: '', tel: '' };
     const res = await callGAS('saveRecord', { record: Object.assign(C.toRecord(n), groupFields(S.group), addrRecord(a.addr, a.tel)) }, true);
     S.machines.push(toMachine(res.record));
-    S.mi = S.machines.length - 1; S.sheet = null; S.screen = 'input'; render(); updSaveBtn();
+    S.mi = S.machines.length - 1; S.sheet = null; S.screen = 'input'; pushNav(); render(); updSaveBtn();
     toast('✅ 登録しました', 'success');
   } catch (e) { toast('❌ 登録できませんでした：' + e.message, 'error'); }
   finally { overlay(''); }
@@ -728,6 +728,48 @@ function startApply() {
 }
 
 // =====================================================
+// 戻る操作（ブラウザの履歴を使う）
+//   画面を進めるたびに履歴を積むので、ホーム画面から開いたアプリでも
+//   画面の左端から右へスワイプすると1つ前の画面に戻れる（Android は戻るボタン）
+//   入力画面から戻るときは、未保存の入力を保存してから戻る
+// =====================================================
+const navState = () => ({ app: 'aircon', screen: S.screen, g: S.group ? S.group.name : null, id: S.screen === 'input' && cur() ? cur().id : null });
+function pushNav()    { try { history.pushState(navState(), ''); } catch (e) { /* 使えない環境では何もしない */ } }
+function replaceNav() { try { history.replaceState(navState(), ''); } catch (e) { /* 同上 */ } }
+function goGroup(g)   { openGroup(g); pushNav(); }
+function navBack() {
+  if (history.state && history.state.app === 'aircon' && history.state.screen !== 'groups') history.back();
+  else popTo({ screen: S.screen === 'input' ? 'group' : 'groups', g: S.group && S.group.name });   // 履歴が無い場合（念のため）
+}
+let navBusy = false;
+async function popTo(st) {
+  if (navBusy) return;
+  navBusy = true;
+  try {
+    if (S.sheet === 'conflict') { pushNav(); return; }                 // 同時編集の確認中は戻らない
+    if (S.sheet) { S.sheet = null; renderSheet(); pushNav(); return; }   // シートが開いていれば閉じるだけ
+    if (S.screen === 'input' && st.screen !== 'input') {
+      if (!(await saveCurrent(true))) { pushNav(); return; }            // 保存できなければ入力画面に留まる
+    }
+    if (st.screen === 'groups') { S.screen = 'groups'; render(); loadGroups(); return; }
+    if (st.screen === 'group') {
+      if (S.group && S.group.name === st.g && S.machines) { S.screen = 'group'; render(); refreshMachines(); }
+      else { const g = allGroups().find(x => x.name === st.g); if (g) await openGroup(g); else { S.screen = 'groups'; render(); loadGroups(); } }
+      return;
+    }
+    if (st.screen === 'input') {                                          // 「進む」で入力画面に戻ってきた場合
+      const i = (S.machines || []).findIndex(m => m.id === st.id);
+      if (i >= 0 && S.group && S.group.name === st.g) await openMachine(i);
+      else replaceNav();
+    }
+  } finally { navBusy = false; }
+}
+window.addEventListener('popstate', e => {
+  const st = e.state && e.state.app === 'aircon' ? e.state : { screen: 'groups' };
+  popTo(st);
+});
+
+// =====================================================
 // イベント
 // =====================================================
 C.bindForm($app, () => (S.screen === 'input' ? cur() : null), 'w', m => { m.dirty = true; updSaveBtn(); });
@@ -739,16 +781,14 @@ async function onAct(e) {
   switch (a) {
     case 'reload':  loadGroups(); break;
     case 'reload-g': openGroup(S.group); break;
-    case 'open-g':  { const g = allGroups().find(x => x.name === b.dataset.g); if (g) openGroup(g); break; }
-    case 'open-m':  openMachine(+b.dataset.i); break;
+    case 'open-g':  { const g = allGroups().find(x => x.name === b.dataset.g); if (g) goGroup(g); break; }
+    case 'open-m':  await openMachine(+b.dataset.i); pushNav(); break;
     case 'flt':     S.filter = b.dataset.v; render(); break;
-    case 'back':
-      if (S.screen === 'input') { if (!(await saveCurrent(true))) return; S.screen = 'group'; render(); refreshMachines(); }
-      else { S.screen = 'groups'; render(); loadGroups(); }
-      break;
+    case 'back':    navBack(); break;   // 画面左端からのスワイプと同じ（履歴で1つ戻る）
     case 'prev': case 'next': {
       if (!(await saveCurrent(true))) return;
       await openMachine(S.mi + (a === 'next' ? 1 : -1));
+      replaceNav();   // 前後の機器への移動は履歴を増やさない（スワイプで戻ると機器一覧へ）
       toast(`${cur().v.系統 || '次の機器'} を表示中`);
       break;
     }
@@ -799,6 +839,7 @@ window.addEventListener('beforeunload', e => { const m = cur(); if (S.screen ===
 // =====================================================
 // 初期化
 // =====================================================
+replaceNav();   // 最初の画面（グループ一覧）を履歴の起点にする
 render();
 loadGroups();
 callGAS('getDiagRules')
