@@ -402,7 +402,7 @@ function inputHTML() {
   const m = cur(), n = S.machines.length;
   return `<header class="hd"><button class="hbtn" data-act="back" aria-label="機器一覧へ">‹</button>
     <div class="g"><div class="s">${esc(S.group.site)} ・ ${S.mi + 1}/${n}台目</div><h1>${esc(m.v.系統 || '（系統未入力）')}</h1></div><span class="ic-pillslot">${C.pillHTML(m)}</span>
-    <button class="hbtn rep" data-act="report" aria-label="この機器の報告書を出力">📄 報告書</button></header>
+    <button class="hbtn rep" data-act="report" aria-label="この機器の報告書を出力">📄 ${isStandalone() ? 'PDF作成' : '報告書'}</button></header>
     <nav class="ic-chips" aria-label="セクション">${C.chipsHTML(m)}</nav>
     <main class="ic-scroll"><div class="ic-formslot">${C.formHTML(m, 'w')}</div></main>
     <div class="ic-foot"><button class="ic-btn" data-act="prev" ${S.mi === 0 ? 'disabled' : ''}>‹ 前</button>
@@ -532,6 +532,15 @@ function renderSheet() {
         <button class="ic-btn" data-act="cf" data-v="cancel">キャンセル（まだ保存しない）</button></div></div>`;
     return;
   }
+  if (S.sheet === 'pdf' && pdfResult) {
+    const kb = Math.max(1, Math.round(pdfResult.blob.size / 1024));
+    $layer.innerHTML = `<div class="sheet-bd" data-act="close"></div><div class="sheet" role="dialog" aria-label="PDFができました"><div class="grab"></div>
+      <h3>📄 PDFができました</h3>
+      <div class="note"><div><b>${esc(pdfResult.name)}</b></div><div>${pdfResult.pages}ページ ・ ${kb >= 1024 ? (kb / 1024).toFixed(1) + 'MB' : kb + 'KB'}</div></div>
+      <div class="note" style="background:var(--ic-gray-bg)">「保存・共有」を押すと共有メニューが開きます。<b>「"ファイル"に保存」</b>で端末に保存、メール・LINE などで送信、<b>「プリント」</b>で印刷もできます。</div>
+      <div class="btns"><button class="ic-btn pri" data-act="pdf-share">PDFを保存・共有</button><button class="ic-btn" data-act="close">閉じる</button></div></div>`;
+    return;
+  }
   if (S.sheet === 'add-m') {
     $layer.innerHTML = `<div class="sheet-bd" data-act="close"></div><div class="sheet" role="dialog" aria-label="機器を追加"><div class="grab"></div><h3>機器を追加</h3>
       <label>系統<input class="ic-fi" id="am-系統" placeholder="例：T-7ミキサー"></label>
@@ -619,9 +628,51 @@ async function saveCurrent(silent) {
   } finally { saving = false; overlay(''); }
 }
 // この機器だけの作業報告書（未保存の入力は先に保存してから、kintone の内容で出力）
+//   ホーム画面から開いたアプリでは印刷が使えない（iPhone の仕様）ため、PDFファイルを直接作って保存・共有する
+const isStandalone = () => window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+async function loadReportData() {
+  const R = window.InspReport;
+  const rec = (await callGAS('getRecord', { id: cur().id })).record;
+  const keys = R.photoKeys(rec), images = {};
+  for (let i = 0; i < keys.length; i++) {
+    overlay(`写真を読み込んでいます... ${i + 1} / ${keys.length}`);
+    const f = await callGAS('getFile', { fileKey: keys[i] });
+    images[keys[i]] = await C.resizeImage(b64ToBlob(f.data, f.contentType), 1000, 0.82);
+  }
+  return { rec, images };
+}
+let pdfResult = null;
+async function exportPdf() {
+  const R = window.InspReport;
+  if (!(await saveCurrent(true))) return;
+  overlay('報告書を準備中...');
+  try {
+    const { rec, images } = await loadReportData();
+    pdfResult = await R.makePdf([rec], { cover: false, images }, msg => overlay(msg));
+    overlay('');
+    S.sheet = 'pdf'; renderSheet();
+  } catch (e) { overlay(''); toast('❌ PDFを作成できませんでした：' + e.message, 'error'); }
+}
+async function sharePdf() {
+  if (!pdfResult) return;
+  const file = new File([pdfResult.blob], pdfResult.name, { type: 'application/pdf' });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: pdfResult.name.replace(/\.pdf$/, '') });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;          // 共有メニューを閉じただけ
+  }
+  // 共有が使えない端末はダウンロード
+  const url = URL.createObjectURL(pdfResult.blob), a = document.createElement('a');
+  a.href = url; a.download = pdfResult.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
 async function exportReport() {
   const R = window.InspReport;
   if (!R) { toast('group_report.js が読み込まれていません', 'error'); return; }
+  if (isStandalone()) { exportPdf(); return; }
   const w = R.prepareWindow(); if (!w) return;   // ポップアップブロック回避のため先に開く
   if (!(await saveCurrent(true))) { R.message(w, '保存できなかったため、報告書の出力を中止しました。', true); return; }
   try {
@@ -794,6 +845,7 @@ async function onAct(e) {
     }
     case 'save':    if (await saveCurrent(false)) { render(); updSaveBtn(); } break;
     case 'report':  exportReport(); break;
+    case 'pdf-share': sharePdf(); break;
     case 'new-g':   Object.assign(ng, { date: today(), site: '', type: C.INSPECT_TYPES[0], name: '', edited: false, inherit: true, src: '', sel: null }); NG_SRC.cache = {}; S.sheet = 'new-g'; renderSheet(); break;
     case 'add-m':   S.sheet = 'add-m'; renderSheet(); break;
     case 'addr':    { const v0 = addrStat().values[0] || { addr: '', tel: '' }; Object.assign(AD, { addr: v0.addr, tel: v0.tel, step: 'edit' }); S.sheet = 'addr'; renderSheet(); break; }

@@ -310,6 +310,15 @@ td.v{font-size:9.4pt}
     var bn = document.getElementById('bar-n'); if (bn) bn.textContent = N;
   }`;
 
+  // ファイル名：1台だけ（表紙なし）は「作業報告書-日付 点検種類 系統」、グループは「…現場名」
+  R.fileName = function (records, opt) {
+    opt = opt || {};
+    const r0 = records[0] || {};
+    return (records.length === 1 && !opt.cover
+      ? `作業報告書-${v(r0, '日付')} ${v(r0, '点検種類')} ${v(r0, '系統')}`
+      : `作業報告書-${v(r0, '日付')} ${v(r0, '点検種類')} ${site(r0)}`).replace(/[\\/:*?"<>|]/g, '_').trim();
+  };
+
   // ───────── 組み立て ─────────
   R.build = function (records, opt) {
     opt = Object.assign({ cover: true, group: '' }, opt);
@@ -327,10 +336,8 @@ td.v{font-size:9.4pt}
       return `<section class="page" data-ref="${p.ref}" data-name="${esc(name)}">${headerHTML('作 業 報 告 書')}${custHTML(p.rec)}${infoHTML(p.rec)}${visualHTML(p.rec)}${measureHTML(p.rec)}${indoorHTML(p.iu, 1, false)}${memoHTML(p.rec)}${photosHTML(p.rec, opt.images)}<div class="grow"></div>${foot}</section>`;
     }).join('\n');
     const r0 = records[0] || {};
-    const fileName = (records.length === 1 && !opt.cover
-      ? `作業報告書-${v(r0, '日付')} ${v(r0, '点検種類')} ${v(r0, '系統')}`
-      : `作業報告書-${v(r0, '日付')} ${v(r0, '点検種類')} ${site(r0)}`).replace(/[\\/:*?"<>|]/g, '_').trim();
-    return `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>${esc(fileName)}</title><style>${R.CSS}</style></head><body>
+    const fileName = R.fileName(records, opt);
+    return `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>${esc(fileName)}</title><style>${R.CSS}${opt.pdf ? '.bar{display:none}html,body{background:#fff}.page{margin:0;box-shadow:none}' : ''}</style></head><body>
       <div class="bar"><b>${esc(records.length === 1 && !opt.cover ? v(r0, '系統') : group)}</b><span>${records.length}台 ・ <span id="bar-n"></span>ページ</span><button onclick="print()">印刷 / PDFに保存</button><span>印刷画面の送信先で「PDFに保存」を選ぶとPDFになります</span></div>
       ${body}
       <script>${LAYOUT_JS}
@@ -378,6 +385,63 @@ td.v{font-size:9.4pt}
       console.error('[group_report]', e);
       w.document.body.innerHTML = '<p style="padding:24px;color:#c00">作成できませんでした：' + esc(e.message || e) + '</p>';
     }
+  };
+
+  // ───────── PDFファイルを直接作る（印刷が使えないホーム画面のWEBアプリ用） ─────────
+  //   報告書を画面外で組み立て → 1ページずつ画像にして（約200dpi）→ A4のPDFにまとめる
+  //   ※ 文字も画像になる（検索・コピー不可）。PC は従来どおり「印刷 → PDFに保存」を使う
+  const LIBS = {
+    html2canvas: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+    jspdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+  };
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`) && (src.indexOf('html2canvas') < 0 || global.html2canvas) && (src.indexOf('jspdf') < 0 || global.jspdf)) return resolve();
+      const sc = document.createElement('script');
+      sc.src = src; sc.onload = () => resolve(); sc.onerror = () => reject(new Error('PDF作成の部品を読み込めませんでした（通信を確認してください）'));
+      document.head.appendChild(sc);
+    });
+  }
+  R.makePdf = async function (records, opt, progress) {
+    opt = Object.assign({ cover: false }, opt, { autoPrint: false, pdf: true });
+    if (progress) progress('PDF作成の準備中...');
+    if (!global.html2canvas) await loadScript(LIBS.html2canvas);
+    if (!global.jspdf) await loadScript(LIBS.jspdf);
+
+    // 画面外に報告書を組み立てる（見えない位置に置くが、描画はさせる）
+    const fr = document.createElement('iframe');
+    fr.setAttribute('aria-hidden', 'true');
+    fr.style.cssText = 'position:fixed;left:-10000px;top:0;width:820px;height:1200px;border:0;visibility:visible';
+    document.body.appendChild(fr);
+    try {
+      await new Promise(res => { fr.onload = res; fr.srcdoc = R.build(records, opt); });
+      const doc = fr.contentDocument;
+      for (let t = 0; t < 200; t++) {                 // レイアウト（ページ送り）が終わるまで待つ
+        const bn = doc.getElementById('bar-n');
+        if (bn && bn.textContent) break;
+        await new Promise(r => setTimeout(r, 50));
+      }
+      await Promise.all([...doc.images].map(im => (im.decode ? im.decode().catch(() => {}) : null)));
+      // SVG画像（ロゴ）は画像化ツールで正しい大きさに描かれないため、表示サイズの4倍の PNG に置き換える
+      await Promise.all([...doc.images].filter(im => /^data:image\/svg|\.svg(\?|$)/i.test(im.src)).map(im => new Promise(res => {
+        const w = im.clientWidth, h = im.clientHeight; if (!w || !h) return res();
+        const cv = doc.createElement('canvas'); cv.width = w * 4; cv.height = h * 4;
+        const src = new Image();
+        src.onload = () => { cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height); im.style.width = w + 'px'; im.style.height = h + 'px'; im.onload = res; im.onerror = res; im.src = cv.toDataURL('image/png'); };
+        src.onerror = res; src.src = im.src;
+      })));
+      const pages = [...doc.querySelectorAll('.page')];
+      const pdf = new global.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+      for (let i = 0; i < pages.length; i++) {
+        if (progress) progress(`PDFを作成中... ${i + 1} / ${pages.length} ページ`);
+        const canvas = await global.html2canvas(pages[i], { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
+          windowWidth: pages[i].scrollWidth, windowHeight: pages[i].scrollHeight });
+        if (i) pdf.addPage('a4', 'portrait');
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.88), 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
+        canvas.width = canvas.height = 0;            // メモリ解放
+      }
+      return { blob: pdf.output('blob'), name: R.fileName(records, opt) + '.pdf', pages: pages.length };
+    } finally { fr.remove(); }
   };
 
   // 写真をダウンロードして縮小（長い辺1000px）→ { fileKey: dataURL }
